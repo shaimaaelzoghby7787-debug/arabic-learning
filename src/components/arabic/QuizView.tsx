@@ -622,7 +622,7 @@ export default function QuizView() {
 
   /* ─── TTS playback ─── */
   const playEncouragement = useCallback((phrase: string) => {
-    speakArabic(phrase, { rate: 0.9 });
+    speakArabic(phrase, { rate: 0.9, raw: true });
   }, []);
 
   /* ─── Handle selecting an option ─── */

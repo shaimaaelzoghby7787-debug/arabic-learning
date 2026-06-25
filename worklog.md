@@ -281,3 +281,28 @@ Stage Summary:
 - Files changed: src/lib/arabic-tts.ts (new), src/components/arabic/LessonView.tsx, src/components/arabic/QuizView.tsx
 - TTS API route kept but no longer used by frontend
 
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix unclear pronunciation of Arabic diacritics (especially damma and sukun)
+
+Work Log:
+- Diagnosed: Browser SpeechSynthesis mumbles isolated diacritics like بُ and بْ
+- Added `enhanceArabicPronunciation()` function to arabic-tts.ts that transforms text:
+  - فتحة (َ): "بَ" → "بَا" (adds ألف to emphasize the "a" sound)
+  - ضمة (ُ): "بُ" → "بُو" (adds واو to emphasize the "u" sound)
+  - كسرة (ِ): "بِ" → "بِي" (adds ياء to emphasize the "i" sound)
+  - سكون (ْ): "بْ" → "باء ساكنة" (speaks letter name + "sākinah")
+  - Plain letter: "ب" → "باء" (speaks letter name)
+  - Full words: pass through unchanged
+- Added LETTER_NAMES map for all 28 Arabic letters
+- Added `raw` option to speakArabic() to skip enhancement for full words
+- Updated QuizView encouragement to use raw: true
+- Verified all diacritic buttons produce no JS errors
+- Verified SpeechSynthesis speaks enhanced text correctly (بُو, باء ساكنة)
+
+Stage Summary:
+- Root cause: Browser TTS cant clearly pronounce isolated diacritical marks
+- Solution: Educational phonetic enhancement - add helper letters per Arabic phonetics rules
+- Files changed: src/lib/arabic-tts.ts, src/components/arabic/QuizView.tsx
+
