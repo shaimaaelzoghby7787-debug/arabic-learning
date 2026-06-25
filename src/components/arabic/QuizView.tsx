@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
+import { speakArabic, stopSpeaking } from '@/lib/arabic-tts';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -567,7 +568,6 @@ export default function QuizView() {
   const [elapsedTime, setElapsedTime] = useState(0);
   const [showStarBurst, setShowStarBurst] = useState(false);
   const [showSubmitScreen, setShowSubmitScreen] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const autoAdvanceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ─── Derived State ─── */
@@ -616,32 +616,13 @@ export default function QuizView() {
   useEffect(() => {
     return () => {
       if (autoAdvanceRef.current) clearTimeout(autoAdvanceRef.current);
+      stopSpeaking();
     };
   }, []);
 
   /* ─── TTS playback ─── */
-  const playEncouragement = useCallback(async (phrase: string) => {
-    try {
-      const res = await fetch('/api/tts/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: phrase, speed: 0.8 }),
-      });
-      if (!res.ok) return;
-      const blob = await res.blob();
-      if (blob.size < 100) return;
-      const audioUrl = URL.createObjectURL(blob);
-      const audio = new Audio(audioUrl);
-      audioRef.current = audio;
-      audio.onended = () => URL.revokeObjectURL(audioUrl);
-      audio.onerror = () => URL.revokeObjectURL(audioUrl);
-      audio.play().catch(() => {
-        /* silently fail – autoplay may be blocked */
-        URL.revokeObjectURL(audioUrl);
-      });
-    } catch {
-      /* silently fail */
-    }
+  const playEncouragement = useCallback((phrase: string) => {
+    speakArabic(phrase, { rate: 0.9 });
   }, []);
 
   /* ─── Handle selecting an option ─── */

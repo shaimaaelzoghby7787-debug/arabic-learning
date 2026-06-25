@@ -1,0 +1,1008 @@
+     1→     1→'use client';
+     2→     2→
+     3→     3→import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+     4→     4→import { motion, AnimatePresence } from 'framer-motion';
+     5→     5→import { Card, CardContent } from '@/components/ui/card';
+     6→     6→import { Button } from '@/components/ui/button';
+     7→     7→import { Progress } from '@/components/ui/progress';
+     8→     8→import { Badge } from '@/components/ui/badge';
+     9→     9→import {
+    10→    10→  AlertDialog,
+    11→    11→  AlertDialogContent,
+    12→    12→  AlertDialogHeader,
+    13→    13→  AlertDialogTitle,
+    14→    14→  AlertDialogDescription,
+    15→    15→  AlertDialogFooter,
+    16→    16→  AlertDialogCancel,
+    17→    17→  AlertDialogAction,
+    18→    18→} from '@/components/ui/alert-dialog';
+    19→    19→import { useAppStore } from '@/lib/store';
+    20→    20→
+    21→    21→/* ─── Constants ─── */
+    22→    22→
+    23→    23→const ENCOURAGEMENTS = ['ممتاز!', 'أحسنت!', 'رائع!', 'بطل!', 'عبقري!'];
+    24→    24→
+    25→    25→const QUIZ_EMOJIS = ['⭐', '🌟', '✨', '📚', '✏️', '🎓'];
+    26→    26→
+    27→    27→const TYPE_LABELS: Record<string, { label: string; emoji: string }> = {
+    28→    28→  multiple_choice: { label: 'اختيار من متعدد', emoji: '📝' },
+    29→    29→  choose_letter: { label: 'اختر الحرف', emoji: '🔤' },
+    30→    30→  complete_word: { label: 'أكمل الكلمة', emoji: '✏️' },
+    31→    31→  true_false: { label: 'صح وخطأ', emoji: '✅' },
+    32→    32→  match_word: { label: 'وصل بالمعنى', emoji: '🔗' },
+    33→    33→};
+    34→    34→
+    35→    35→const OPTION_LABELS = ['أ', 'ب', 'ت', 'ث', 'ج', 'ح'];
+    36→    36→
+    37→    37→const OPTION_COLORS = [
+    38→    38→  { bg: 'bg-rose-50', border: 'border-rose-300', hover: 'hover:bg-rose-100', text: 'text-rose-800' },
+    39→    39→  { bg: 'bg-amber-50', border: 'border-amber-300', hover: 'hover:bg-amber-100', text: 'text-amber-800' },
+    40→    40→  { bg: 'bg-emerald-50', border: 'border-emerald-300', hover: 'hover:bg-emerald-100', text: 'text-emerald-800' },
+    41→    41→  { bg: 'bg-violet-50', border: 'border-violet-300', hover: 'hover:bg-violet-100', text: 'text-violet-800' },
+    42→    42→];
+    43→    43→
+    44→    44→const ARABIC_INDICATORS = ['أ', 'ب', 'ت', 'ث', 'ج', 'ح'];
+    45→    45→
+    46→    46→/* ─── Helpers ─── */
+    47→    47→
+    48→    48→function parseOptions(options: string[] | string): string[] {
+    49→    49→  if (Array.isArray(options)) return options;
+    50→    50→  try {
+    51→    51→    const parsed = JSON.parse(options);
+    52→    52→    return Array.isArray(parsed) ? parsed : [];
+    53→    53→  } catch {
+    54→    54→    return [];
+    55→    55→  }
+    56→    56→}
+    57→    57→
+    58→    58→function formatTime(seconds: number): string {
+    59→    59→  const mins = Math.floor(seconds / 60);
+    60→    60→  const secs = seconds % 60;
+    61→    61→  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    62→    62→}
+    63→    63→
+    64→    64→/* ─── Star Burst Effect ─── */
+    65→    65→
+    66→    66→function StarBurst({ show }: { show: boolean }) {
+    67→    67→  if (!show) return null;
+    68→    68→  return (
+    69→    69→    <div className="absolute inset-0 pointer-events-none overflow-hidden z-20">
+    70→    70→      {Array.from({ length: 10 }).map((_, i) => (
+    71→    71→        <motion.div
+    72→    72→          key={i}
+    73→    73→          className="absolute text-2xl"
+    74→    74→          style={{ left: '50%', top: '40%' }}
+    75→    75→          initial={{ x: 0, y: 0, scale: 0, opacity: 1 }}
+    76→    76→          animate={{
+    77→    77→            x: (Math.random() - 0.5) * 240,
+    78→    78→            y: (Math.random() - 0.5) * 200,
+    79→    79→            scale: [0, 1.5, 0.3],
+    80→    80→            opacity: [1, 1, 0],
+    81→    81→            rotate: Math.random() * 360,
+    82→    82→          }}
+    83→    83→          transition={{ duration: 1.1, ease: 'easeOut', delay: i * 0.03 }}
+    84→    84→        >
+    85→    85→          {['⭐', '🌟', '✨', '💫'][Math.floor(Math.random() * 4)]}
+    86→    86→        </motion.div>
+    87→    87→      ))}
+    88→    88→    </div>
+    89→    89→  );
+    90→    90→}
+    91→    91→
+    92→    92→/* ─── Feedback Banner ─── */
+    93→    93→
+    94→    94→function FeedbackBanner({ isCorrect, encouragement }: { isCorrect: boolean; encouragement: string }) {
+    95→    95→  return (
+    96→    96→    <AnimatePresence>
+    97→    97→      <motion.div
+    98→    98→        initial={{ opacity: 0, scale: 0.8, y: 10 }}
+    99→    99→        animate={{ opacity: 1, scale: 1, y: 0 }}
+   100→   100→        exit={{ opacity: 0, scale: 0.8, y: -10 }}
+   101→   101→        transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+   102→   102→        className={`mt-4 py-3 px-6 rounded-2xl text-lg font-bold inline-block ${
+   103→   103→          isCorrect
+   104→   104→            ? 'bg-emerald-100 text-emerald-700 shadow-md shadow-emerald-200/50'
+   105→   105→            : 'bg-red-100 text-red-600 shadow-md shadow-red-200/50'
+   106→   106→        }`}
+   107→   107→      >
+   108→   108→        <motion.div
+   109→   109→          animate={isCorrect ? { scale: [1, 1.1, 1] } : { x: [0, -8, 8, -4, 4, 0] }}
+   110→   110→          transition={{ duration: isCorrect ? 0.5 : 0.45, repeat: isCorrect ? 1 : 0 }}
+   111→   111→          className="flex items-center justify-center gap-2"
+   112→   112→        >
+   113→   113→          {isCorrect ? (
+   114→   114→            <>
+   115→   115→              <span className="text-2xl">🎉</span>
+   116→   116→              <span>{encouragement}</span>
+   117→   117→              <span className="text-2xl">⭐</span>
+   118→   118→            </>
+   119→   119→          ) : (
+   120→   120→            <>
+   121→   121→              <span className="text-2xl">😅</span>
+   122→   122→              <span>حاول مرة أخرى في المرة القادمة!</span>
+   123→   123→            </>
+   124→   124→          )}
+   125→   125→        </motion.div>
+   126→   126→      </motion.div>
+   127→   127→    </AnimatePresence>
+   128→   128→  );
+   129→   129→}
+   130→   130→
+   131→   131→/* ─── Standard Options (multiple_choice, match_word) ─── */
+   132→   132→
+   133→   133→function StandardOptions({
+   134→   134→  options,
+   135→   135→  selectedOption,
+   136→   136→  isAnswered,
+   137→   137→  correctAnswer,
+   138→   138→  onSelect,
+   139→   139→}: {
+   140→   140→  options: string[];
+   141→   141→  selectedOption: string | null;
+   142→   142→  isAnswered: boolean;
+   143→   143→  correctAnswer: string;
+   144→   144→  onSelect: (option: string) => void;
+   145→   145→}) {
+   146→   146→  return (
+   147→   147→    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   148→   148→      {options.map((option, index) => {
+   149→   149→        const color = OPTION_COLORS[index % OPTION_COLORS.length];
+   150→   150→        const isSelected = selectedOption === option;
+   151→   151→        const isCorrectOpt = option === correctAnswer;
+   152→   152→        const isWrongSel = isAnswered && isSelected && !isCorrectOpt;
+   153→   153→
+   154→   154→        let borderClass = color.border;
+   155→   155→        let bgClass = isAnswered ? color.bg : `${color.bg} ${color.hover}`;
+   156→   156→        let textClass = color.text;
+   157→   157→
+   158→   158→        if (isAnswered && isCorrectOpt) {
+   159→   159→          borderClass = 'border-emerald-500';
+   160→   160→          bgClass = 'bg-emerald-50';
+   161→   161→          textClass = 'text-emerald-700';
+   162→   162→        } else if (isWrongSel) {
+   163→   163→          borderClass = 'border-red-400';
+   164→   164→          bgClass = 'bg-red-50';
+   165→   165→          textClass = 'text-red-500';
+   166→   166→        } else if (isSelected && !isAnswered) {
+   167→   167→          borderClass = 'border-orange-400';
+   168→   168→          bgClass = 'bg-orange-100';
+   169→   169→        }
+   170→   170→
+   171→   171→        return (
+   172→   172→          <motion.button
+   173→   173→            key={index}
+   174→   174→            onClick={() => onSelect(option)}
+   175→   175→            disabled={isAnswered}
+   176→   176→            whileHover={!isAnswered ? { scale: 1.03, y: -2 } : {}}
+   177→   177→            whileTap={!isAnswered ? { scale: 0.97 } : {}}
+   178→   178→            animate={
+   179→   179→              isWrongSel
+   180→   180→                ? { x: [0, -6, 6, -3, 3, 0] }
+   181→   181→                : isAnswered && isCorrectOpt
+   182→   182→                  ? { scale: [1, 1.04, 1] }
+   183→   183→                  : {}
+   184→   184→            }
+   185→   185→            transition={{ duration: 0.4 }}
+   186→   186→            className={`relative w-full p-4 sm:p-5 rounded-2xl border-2 ${borderClass} ${bgClass} transition-colors duration-200 min-h-[56px] flex items-center gap-3 ${
+   187→   187→              isAnswered ? 'cursor-default' : 'cursor-pointer'
+   188→   188→            }`}
+   189→   189→          >
+   190→   190→            {/* Letter indicator */}
+   191→   191→            <span
+   192→   192→              className={`flex items-center justify-center w-9 h-9 rounded-full text-sm font-bold shrink-0 ${
+   193→   193→                isAnswered && isCorrectOpt
+   194→   194→                  ? 'bg-emerald-500 text-white'
+   195→   195→                  : isWrongSel
+   196→   196→                    ? 'bg-red-400 text-white'
+   197→   197→                    : `${color.bg} ${color.text} border ${color.border}`
+   198→   198→              }`}
+   199→   199→            >
+   200→   200→              {ARABIC_INDICATORS[index % ARABIC_INDICATORS.length]}
+   201→   201→            </span>
+   202→   202→
+   203→   203→            {/* Option text */}
+   204→   204→            <span
+   205→   205→              className={`text-base sm:text-lg font-semibold flex-1 text-right ${
+   206→   206→                isAnswered && isCorrectOpt
+   207→   207→                  ? 'text-emerald-700'
+   208→   208→                  : isWrongSel
+   209→   209→                    ? 'text-red-500 line-through'
+   210→   210→                    : textClass
+   211→   211→              }`}
+   212→   212→            >
+   213→   213→              {option}
+   214→   214→            </span>
+   215→   215→
+   216→   216→            {/* Feedback icon */}
+   217→   217→            {isAnswered && isCorrectOpt && (
+   218→   218→              <motion.span
+   219→   219→                initial={{ scale: 0, rotate: -180 }}
+   220→   220→                animate={{ scale: 1, rotate: 0 }}
+   221→   221→                transition={{ type: 'spring', stiffness: 300, damping: 15 }}
+   222→   222→                className="text-xl shrink-0"
+   223→   223→              >
+   224→   224→                ✅
+   225→   225→              </motion.span>
+   226→   226→            )}
+   227→   227→            {isWrongSel && (
+   228→   228→              <motion.span
+   229→   229→                initial={{ scale: 0 }}
+   230→   230→                animate={{ scale: 1 }}
+   231→   231→                className="text-xl shrink-0"
+   232→   232→              >
+   233→   233→                ❌
+   234→   234→              </motion.span>
+   235→   235→            )}
+   236→   236→          </motion.button>
+   237→   237→        );
+   238→   238→      })}
+   239→   239→    </div>
+   240→   240→  );
+   241→   241→}
+   242→   242→
+   243→   243→/* ─── True / False Options ─── */
+   244→   244→
+   245→   245→function TrueFalseOptions({
+   246→   246→  options,
+   247→   247→  selectedOption,
+   248→   248→  isAnswered,
+   249→   249→  correctAnswer,
+   250→   250→  onSelect,
+   251→   251→}: {
+   252→   252→  options: string[];
+   253→   253→  selectedOption: string | null;
+   254→   254→  isAnswered: boolean;
+   255→   255→  correctAnswer: string;
+   256→   256→  onSelect: (option: string) => void;
+   257→   257→}) {
+   258→   258→  // Identify true and false options from the options array
+   259→   259→  const trueOpt =
+   260→   260→    options.find((o) => o.includes('صح') || o.includes('✓') || o.includes('صواب')) ||
+   261→   261→    options[0];
+   262→   262→  const falseOpt =
+   263→   263→    options.find((o) => o.includes('خطأ') || o.includes('✗') || o.includes('غلط')) ||
+   264→   264→    options[1];
+   265→   265→
+   266→   266→  const buttons = [
+   267→   267→    { option: trueOpt, label: 'صح ✓', baseBorder: 'border-emerald-200', baseBg: 'bg-emerald-50/70 hover:bg-emerald-100', baseText: 'text-emerald-700', icon: '✅' },
+   268→   268→    { option: falseOpt, label: 'خطأ ✗', baseBorder: 'border-red-200', baseBg: 'bg-red-50/70 hover:bg-red-100', baseText: 'text-red-600', icon: '❌' },
+   269→   269→  ];
+   270→   270→
+   271→   271→  return (
+   272→   272→    <div className="grid grid-cols-2 gap-4">
+   273→   273→      {buttons.map(({ option, label, baseBorder, baseBg, baseText, icon }) => {
+   274→   274→        const isSelected = selectedOption === option;
+   275→   275→        const isCorrectOpt = option === correctAnswer;
+   276→   276→        const isWrongSel = isAnswered && isSelected && !isCorrectOpt;
+   277→   277→
+   278→   278→        let borderClass = baseBorder;
+   279→   279→        let bgClass = isAnswered ? baseBg.split(' ')[0] : baseBg;
+   280→   280→        let textClass = baseText;
+   281→   281→
+   282→   282→        if (isAnswered && isCorrectOpt) {
+   283→   283→          borderClass = 'border-emerald-500';
+   284→   284→          bgClass = 'bg-emerald-100';
+   285→   285→          textClass = 'text-emerald-700';
+   286→   286→        } else if (isWrongSel) {
+   287→   287→          borderClass = 'border-red-400';
+   288→   288→          bgClass = 'bg-red-100';
+   289→   289→          textClass = 'text-red-500';
+   290→   290→        } else if (isSelected && !isAnswered) {
+   291→   291→          borderClass = 'border-orange-400';
+   292→   292→          bgClass = 'bg-orange-100';
+   293→   293→        }
+   294→   294→
+   295→   295→        return (
+   296→   296→          <motion.button
+   297→   297→            key={option}
+   298→   298→            onClick={() => onSelect(option)}
+   299→   299→            disabled={isAnswered}
+   300→   300→            whileHover={!isAnswered ? { scale: 1.05, y: -3 } : {}}
+   301→   301→            whileTap={!isAnswered ? { scale: 0.93 } : {}}
+   302→   302→            animate={
+   303→   303→              isWrongSel
+   304→   304→                ? { x: [0, -8, 8, -4, 4, 0] }
+   305→   305→                : isAnswered && isCorrectOpt
+   306→   306→                  ? { scale: [1, 1.08, 1] }
+   307→   307→                  : {}
+   308→   308→            }
+   309→   309→            transition={{ duration: 0.4 }}
+   310→   310→            className={`relative border-2 ${borderClass} ${bgClass} rounded-2xl py-6 sm:py-8 flex flex-col items-center justify-center gap-2 min-h-[90px] transition-colors duration-200 ${
+   311→   311→              isAnswered ? 'cursor-default' : 'cursor-pointer'
+   312→   312→            }`}
+   313→   313→          >
+   314→   314→            <span className="text-3xl sm:text-4xl">{icon}</span>
+   315→   315→            <span className={`text-xl sm:text-2xl font-bold ${textClass}`}>{label}</span>
+   316→   316→
+   317→   317→            {/* Star badge for correct */}
+   318→   318→            {isAnswered && isCorrectOpt && (
+   319→   319→              <motion.span
+   320→   320→                initial={{ scale: 0, rotate: -180 }}
+   321→   321→                animate={{ scale: 1, rotate: 0 }}
+   322→   322→                transition={{ type: 'spring', stiffness: 300, damping: 15 }}
+   323→   323→                className="absolute -top-2 -left-2 text-xl"
+   324→   324→              >
+   325→   325→                ⭐
+   326→   326→              </motion.span>
+   327→   327→            )}
+   328→   328→            {isWrongSel && (
+   329→   329→              <motion.span
+   330→   330→                initial={{ scale: 0 }}
+   331→   331→                animate={{ scale: 1 }}
+   332→   332→                className="absolute -top-2 -left-2 text-xl"
+   333→   333→              >
+   334→   334→                ❌
+   335→   335→              </motion.span>
+   336→   336→            )}
+   337→   337→          </motion.button>
+   338→   338→        );
+   339→   339→      })}
+   340→   340→    </div>
+   341→   341→  );
+   342→   342→}
+   343→   343→
+   344→   344→/* ─── Letter Options (choose_letter) ─── */
+   345→   345→
+   346→   346→function LetterOptions({
+   347→   347→  options,
+   348→   348→  selectedOption,
+   349→   349→  isAnswered,
+   350→   350→  correctAnswer,
+   351→   351→  onSelect,
+   352→   352→}: {
+   353→   353→  options: string[];
+   354→   354→  selectedOption: string | null;
+   355→   355→  isAnswered: boolean;
+   356→   356→  correctAnswer: string;
+   357→   357→  onSelect: (option: string) => void;
+   358→   358→}) {
+   359→   359→  return (
+   360→   360→    <div className="flex flex-wrap justify-center gap-4">
+   361→   361→      {options.map((option, index) => {
+   362→   362→        const isSelected = selectedOption === option;
+   363→   363→        const isCorrectOpt = option === correctAnswer;
+   364→   364→        const isWrongSel = isAnswered && isSelected && !isCorrectOpt;
+   365→   365→        const color = OPTION_COLORS[index % OPTION_COLORS.length];
+   366→   366→
+   367→   367→        let borderClass = color.border;
+   368→   368→        let bgClass = isAnswered ? color.bg : `${color.bg} ${color.hover}`;
+   369→   369→        let textClass = color.text;
+   370→   370→
+   371→   371→        if (isAnswered && isCorrectOpt) {
+   372→   372→          borderClass = 'border-emerald-500';
+   373→   373→          bgClass = 'bg-emerald-100';
+   374→   374→          textClass = 'text-emerald-700';
+   375→   375→        } else if (isWrongSel) {
+   376→   376→          borderClass = 'border-red-400';
+   377→   377→          bgClass = 'bg-red-100';
+   378→   378→          textClass = 'text-red-500';
+   379→   379→        } else if (isSelected && !isAnswered) {
+   380→   380→          borderClass = 'border-orange-400';
+   381→   381→          bgClass = 'bg-orange-100';
+   382→   382→          textClass = 'text-orange-700';
+   383→   383→        }
+   384→   384→
+   385→   385→        return (
+   386→   386→          <motion.button
+   387→   387→            key={index}
+   388→   388→            onClick={() => onSelect(option)}
+   389→   389→            disabled={isAnswered}
+   390→   390→            whileHover={!isAnswered ? { scale: 1.15, y: -4 } : {}}
+   391→   391→            whileTap={!isAnswered ? { scale: 0.88 } : {}}
+   392→   392→            animate={
+   393→   393→              isWrongSel
+   394→   394→                ? { x: [0, -8, 8, -4, 4, 0] }
+   395→   395→                : isAnswered && isCorrectOpt
+   396→   396→                  ? { scale: [1, 1.2, 1], rotate: [0, 10, -10, 0] }
+   397→   397→                  : {}
+   398→   398→            }
+   399→   399→            transition={{ duration: 0.4 }}
+   400→   400→            className={`relative w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 ${borderClass} ${bgClass} flex items-center justify-center text-2xl sm:text-3xl font-bold transition-colors duration-200 ${
+   401→   401→              isAnswered ? 'cursor-default' : 'cursor-pointer'
+   402→   402→            } ${textClass}`}
+   403→   403→          >
+   404→   404→            {option}
+   405→   405→            {isAnswered && isCorrectOpt && (
+   406→   406→              <motion.span
+   407→   407→                initial={{ scale: 0 }}
+   408→   408→                animate={{ scale: 1 }}
+   409→   409→                transition={{ type: 'spring', stiffness: 400, damping: 12 }}
+   410→   410→                className="absolute -top-1 -right-1 text-lg"
+   411→   411→              >
+   412→   412→                ⭐
+   413→   413→              </motion.span>
+   414→   414→            )}
+   415→   415→            {isWrongSel && (
+   416→   416→              <motion.span
+   417→   417→                initial={{ scale: 0 }}
+   418→   418→                animate={{ scale: 1 }}
+   419→   419→                className="absolute -top-1 -right-1 text-lg"
+   420→   420→              >
+   421→   421→                ❌
+   422→   422→              </motion.span>
+   423→   423→            )}
+   424→   424→          </motion.button>
+   425→   425→        );
+   426→   426→      })}
+   427→   427→    </div>
+   428→   428→  );
+   429→   429→}
+   430→   430→
+   431→   431→/* ─── Complete Word Options ─── */
+   432→   432→
+   433→   433→function CompleteWordOptions({
+   434→   434→  options,
+   435→   435→  selectedOption,
+   436→   436→  isAnswered,
+   437→   437→  correctAnswer,
+   438→   438→  onSelect,
+   439→   439→  question,
+   440→   440→}: {
+   441→   441→  options: string[];
+   442→   442→  selectedOption: string | null;
+   443→   443→  isAnswered: boolean;
+   444→   444→  correctAnswer: string;
+   445→   445→  onSelect: (option: string) => void;
+   446→   446→  question: string;
+   447→   447→}) {
+   448→   448→  // Extract the word display portion (everything after colon or the full question)
+   449→   449→  const wordPart = question.includes('：') || question.includes(':')
+   450→   450→    ? (question.split(/[:：]/).pop()?.trim() ?? question)
+   451→   451→    : question;
+   452→   452→  // Render blank dashes more visibly
+   453→   453→  const displayWord = wordPart.replace(/[_ـ]{1,}/g, 'ـ');
+   454→   454→
+   455→   455→  return (
+   456→   456→    <div className="flex flex-col items-center gap-5">
+   457→   457→      {/* The incomplete word */}
+   458→   458→      <div className="bg-amber-50 border-2 border-dashed border-amber-300 rounded-2xl px-8 py-5">
+   459→   459→        <span className="text-4xl sm:text-5xl font-bold text-gray-800 tracking-[0.15em]" dir="rtl">
+   460→   460→          {displayWord}
+   461→   461→        </span>
+   462→   462→      </div>
+   463→   463→
+   464→   464→      <p className="text-sm text-gray-500 font-medium">اختر الحرف الناقص ✏️</p>
+   465→   465→
+   466→   466→      {/* Letter choices */}
+   467→   467→      <div className="flex flex-wrap justify-center gap-4">
+   468→   468→        {options.map((option, index) => {
+   469→   469→          const isSelected = selectedOption === option;
+   470→   470→          const isCorrectOpt = option === correctAnswer;
+   471→   471→          const isWrongSel = isAnswered && isSelected && !isCorrectOpt;
+   472→   472→          const color = OPTION_COLORS[index % OPTION_COLORS.length];
+   473→   473→
+   474→   474→          let borderClass = color.border;
+   475→   475→          let bgClass = isAnswered ? color.bg : `${color.bg} ${color.hover}`;
+   476→   476→          let textClass = color.text;
+   477→   477→
+   478→   478→          if (isAnswered && isCorrectOpt) {
+   479→   479→            borderClass = 'border-emerald-500';
+   480→   480→            bgClass = 'bg-emerald-100';
+   481→   481→            textClass = 'text-emerald-700';
+   482→   482→          } else if (isWrongSel) {
+   483→   483→            borderClass = 'border-red-400';
+   484→   484→            bgClass = 'bg-red-100';
+   485→   485→            textClass = 'text-red-500';
+   486→   486→          } else if (isSelected && !isAnswered) {
+   487→   487→            borderClass = 'border-orange-400';
+   488→   488→            bgClass = 'bg-orange-100';
+   489→   489→            textClass = 'text-orange-700';
+   490→   490→          }
+   491→   491→
+   492→   492→          return (
+   493→   493→            <motion.button
+   494→   494→              key={index}
+   495→   495→              onClick={() => onSelect(option)}
+   496→   496→              disabled={isAnswered}
+   497→   497→              whileHover={!isAnswered ? { scale: 1.15, y: -4 } : {}}
+   498→   498→              whileTap={!isAnswered ? { scale: 0.88 } : {}}
+   499→   499→              animate={
+   500→   500→                isWrongSel
+   501→   501→                  ? { x: [0, -8, 8, -4, 4, 0] }
+   502→   502→                  : isAnswered && isCorrectOpt
+   503→   503→                    ? { scale: [1, 1.25, 1], y: [0, -8, 0] }
+   504→   504→                    : {}
+   505→   505→              }
+   506→   506→              transition={{ duration: 0.4 }}
+   507→   507→              className={`relative w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 ${borderClass} ${bgClass} flex items-center justify-center text-2xl sm:text-3xl font-bold transition-colors duration-200 ${
+   508→   508→                isAnswered ? 'cursor-default' : 'cursor-pointer'
+   509→   509→              } ${textClass}`}
+   510→   510→            >
+   511→   511→              {option}
+   512→   512→              {isAnswered && isCorrectOpt && (
+   513→   513→                <motion.span
+   514→   514→                  initial={{ scale: 0 }}
+   515→   515→                  animate={{ scale: 1 }}
+   516→   516→                  transition={{ type: 'spring', stiffness: 400, damping: 12 }}
+   517→   517→                  className="absolute -top-1 -right-1 text-lg"
+   518→   518→                >
+   519→   519→                  ⭐
+   520→   520→                </motion.span>
+   521→   521→              )}
+   522→   522→              {isWrongSel && (
+   523→   523→                <motion.span
+   524→   524→                  initial={{ scale: 0 }}
+   525→   525→                  animate={{ scale: 1 }}
+   526→   526→                  className="absolute -top-1 -right-1 text-lg"
+   527→   527→                >
+   528→   528→                  ❌
+   529→   529→                </motion.span>
+   530→   530→              )}
+   531→   531→            </motion.button>
+   532→   532→          );
+   533→   533→        })}
+   534→   534→      </div>
+   535→   535→    </div>
+   536→   536→  );
+   537→   537→}
+   538→   538→
+   539→   539→/* ═══════════════════════════════════════════════════════════════
+   540→   540→   Main QuizView Component
+   541→   541→   ═══════════════════════════════════════════════════════════════ */
+   542→   542→
+   543→   543→export default function QuizView() {
+   544→   544→  const {
+   545→   545→    studentId,
+   546→   546→    currentLessonId,
+   547→   547→    currentUnitId,
+   548→   548→    quizType,
+   549→   549→    quizQuestions,
+   550→   550→    currentQuestionIndex,
+   551→   551→    quizAnswers,
+   552→   552→    quizStartTime,
+   553→   553→    answerQuestion,
+   554→   554→    nextQuestion,
+   555→   555→    navigate,
+   556→   556→    resetQuiz,
+   557→   557→    setResult,
+   558→   558→  } = useAppStore();
+   559→   559→
+   560→   560→  /* ─── Local State ─── */
+   561→   561→  const [selectedOption, setSelectedOption] = useState<string | null>(null);
+   562→   562→  const [isAnswered, setIsAnswered] = useState(false);
+   563→   563→  const [isCorrect, setIsCorrect] = useState(false);
+   564→   564→  const [encouragement, setEncouragement] = useState('');
+   565→   565→  const [showExitDialog, setShowExitDialog] = useState(false);
+   566→   566→  const [isSubmitting, setIsSubmitting] = useState(false);
+   567→   567→  const [elapsedTime, setElapsedTime] = useState(0);
+   568→   568→  const [showStarBurst, setShowStarBurst] = useState(false);
+   569→   569→  const [showSubmitScreen, setShowSubmitScreen] = useState(false);
+   570→   570→  const audioRef = useRef<HTMLAudioElement | null>(null);
+   571→   571→  const autoAdvanceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+   572→   572→
+   573→   573→  /* ─── Derived State ─── */
+   574→   574→  const currentQuestion = quizQuestions[currentQuestionIndex] ?? null;
+   575→   575→  const options = useMemo(
+   576→   576→    () => (currentQuestion ? parseOptions(currentQuestion.options) : []),
+   577→   577→    [currentQuestion],
+   578→   578→  );
+   579→   579→
+   580→   580→  const totalQuestions = quizQuestions.length;
+   581→   581→  const isLastQuestion = currentQuestionIndex >= totalQuestions - 1;
+   582→   582→  const progressPercent =
+   583→   583→    totalQuestions > 0 ? ((currentQuestionIndex + 1) / totalQuestions) * 100 : 0;
+   584→   584→
+   585→   585→  // Stars earned this session (correct answers so far)
+   586→   586→  const sessionStars = useMemo(() => {
+   587→   587→    let count = 0;
+   588→   588→    for (let i = 0; i < quizAnswers.length; i++) {
+   589→   589→      const q = quizQuestions[i];
+   590→   590→      if (q && quizAnswers[i]?.answer === q.correctAnswer) {
+   591→   591→        count++;
+   592→   592→      }
+   593→   593→    }
+   594→   594→    return count;
+   595→   595→  }, [quizAnswers, quizQuestions]);
+   596→   596→
+   597→   597→  /* ─── Timer ─── */
+   598→   598→  useEffect(() => {
+   599→   599→    if (quizStartTime === 0) return;
+   600→   600→    const interval = setInterval(() => {
+   601→   601→      setElapsedTime(Math.floor((Date.now() - quizStartTime) / 1000));
+   602→   602→    }, 1000);
+   603→   603→    return () => clearInterval(interval);
+   604→   604→  }, [quizStartTime]);
+   605→   605→
+   606→   606→  /* ─── Reset local state when question index changes ─── */
+   607→   607→  useEffect(() => {
+   608→   608→    setSelectedOption(null);
+   609→   609→    setIsAnswered(false);
+   610→   610→    setIsCorrect(false);
+   611→   611→    setEncouragement('');
+   612→   612→    setShowStarBurst(false);
+   613→   613→  }, [currentQuestionIndex]);
+   614→   614→
+   615→   615→  /* ─── Cleanup ─── */
+   616→   616→  useEffect(() => {
+   617→   617→    return () => {
+   618→   618→      if (autoAdvanceRef.current) clearTimeout(autoAdvanceRef.current);
+   619→   619→    };
+   620→   620→  }, []);
+   621→   621→
+   622→   622→  /* ─── TTS playback ─── */
+   623→   623→  const playEncouragement = useCallback(async (phrase: string) => {
+   624→   624→    try {
+   625→   625→      const res = await fetch('/api/tts/speak', {
+   626→   626→        method: 'POST',
+   627→   627→        headers: { 'Content-Type': 'application/json' },
+   628→   628→        body: JSON.stringify({ text: phrase, speed: 0.8 }),
+   629→   629→      });
+   630→   630→      if (!res.ok) return;
+   631→   631→      const blob = await res.blob();
+   632→   632→      if (blob.size < 100) return;
+   633→   633→      const audioUrl = URL.createObjectURL(blob);
+   634→   634→      const audio = new Audio(audioUrl);
+   635→   635→      audioRef.current = audio;
+   636→   636→      audio.onended = () => URL.revokeObjectURL(audioUrl);
+   637→   637→      audio.onerror = () => URL.revokeObjectURL(audioUrl);
+   638→   638→      audio.play().catch(() => {
+   639→   639→        /* silently fail – autoplay may be blocked */
+   640→   640→        URL.revokeObjectURL(audioUrl);
+   641→   641→      });
+   642→   642→    } catch {
+   643→   643→      /* silently fail */
+   644→   644→    }
+   645→   645→  }, []);
+   646→   646→
+   647→   647→  /* ─── Handle selecting an option ─── */
+   648→   648→  const handleSelectOption = useCallback(
+   649→   649→    (option: string) => {
+   650→   650→      if (isAnswered || !currentQuestion) return;
+   651→   651→
+   652→   652→      setSelectedOption(option);
+   653→   653→      setIsAnswered(true);
+   654→   654→
+   655→   655→      const correct = option === currentQuestion.correctAnswer;
+   656→   656→      setIsCorrect(correct);
+   657→   657→      answerQuestion(currentQuestion.id, option);
+   658→   658→
+   659→   659→      if (correct) {
+   660→   660→        const phrase = ENCOURAGEMENTS[Math.floor(Math.random() * ENCOURAGEMENTS.length)];
+   661→   661→        setEncouragement(phrase);
+   662→   662→        setShowStarBurst(true);
+   663→   663→        playEncouragement(phrase);
+   664→   664→      }
+   665→   665→    },
+   666→   666→    [isAnswered, currentQuestion, answerQuestion, playEncouragement],
+   667→   667→  );
+   668→   668→
+   669→   669→  /* ─── Auto-advance after feedback (2 s) ─── */
+   670→   670→  useEffect(() => {
+   671→   671→    if (!isAnswered) return;
+   672→   672→    // On last question → show submit screen instead of advancing
+   673→   673→    if (isLastQuestion) {
+   674→   674→      const t = setTimeout(() => setShowSubmitScreen(true), 1500);
+   675→   675→      return () => clearTimeout(t);
+   676→   676→    }
+   677→   677→    autoAdvanceRef.current = setTimeout(() => {
+   678→   678→      nextQuestion();
+   679→   679→    }, 2000);
+   680→   680→    return () => {
+   681→   681→      if (autoAdvanceRef.current) clearTimeout(autoAdvanceRef.current);
+   682→   682→    };
+   683→   683→  }, [isAnswered, isLastQuestion, nextQuestion]);
+   684→   684→
+   685→   685→  /* ─── Submit quiz ─── */
+   686→   686→  const handleSubmit = useCallback(async () => {
+   687→   687→    if (!studentId || !currentLessonId || isSubmitting) return;
+   688→   688→
+   689→   689→    setIsSubmitting(true);
+   690→   690→    try {
+   691→   691→      const timeSpent = Math.round((Date.now() - quizStartTime) / 1000);
+   692→   692→      const res = await fetch('/api/quiz/submit', {
+   693→   693→        method: 'POST',
+   694→   694→        headers: { 'Content-Type': 'application/json' },
+   695→   695→        body: JSON.stringify({
+   696→   696→          studentId,
+   697→   697→          lessonId: currentLessonId,
+   698→   698→          unitId: currentUnitId || '',
+   699→   699→          type: quizType,
+   700→   700→          answers: quizAnswers,
+   701→   701→          timeSpent,
+   702→   702→        }),
+   703→   703→      });
+   704→   704→      const data = await res.json();
+   705→   705→      if (res.ok) {
+   706→   706→        setResult(data);
+   707→   707→        navigate('results');
+   708→   708→      } else {
+   709→   709→        console.error('Quiz submit failed:', data.error);
+   710→   710→      }
+   711→   711→    } catch (err) {
+   712→   712→      console.error('Quiz submit error:', err);
+   713→   713→    } finally {
+   714→   714→      setIsSubmitting(false);
+   715→   715→    }
+   716→   716→  }, [studentId, currentLessonId, currentUnitId, quizType, quizAnswers, quizStartTime, isSubmitting, setResult, navigate]);
+   717→   717→
+   718→   718→  /* ─── Exit quiz ─── */
+   719→   719→  const handleExit = useCallback(() => {
+   720→   720→    resetQuiz();
+   721→   721→    navigate(quizType === 'lesson_quiz' ? 'lesson' : 'units');
+   722→   722→  }, [resetQuiz, navigate, quizType]);
+   723→   723→
+   724→   724→  /* ─── Guard: no questions ─── */
+   725→   725→  if (totalQuestions === 0 || !currentQuestion) {
+   726→   726→    return (
+   727→   727→      <div className="min-h-screen flex flex-col bg-gradient-to-b from-orange-50 via-yellow-50 to-rose-50">
+   728→   728→        <main className="flex-1 flex items-center justify-center p-4">
+   729→   729→          <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm max-w-sm w-full">
+   730→   730→            <CardContent className="pt-8 pb-8 flex flex-col items-center gap-4">
+   731→   731→              <motion.span
+   732→   732→                className="text-6xl"
+   733→   733→                animate={{ y: [0, -10, 0] }}
+   734→   734→                transition={{ duration: 2, repeat: Infinity }}
+   735→   735→              >
+   736→   736→                📝
+   737→   737→              </motion.span>
+   738→   738→              <p className="text-lg text-gray-600 font-medium">لا توجد أسئلة متاحة</p>
+   739→   739→              <Button onClick={handleExit} className="rounded-xl mt-2">
+   740→   740→                العودة
+   741→   741→              </Button>
+   742→   742→            </CardContent>
+   743→   743→          </Card>
+   744→   744→        </main>
+   745→   745→      </div>
+   746→   746→    );
+   747→   747→  }
+   748→   748→
+   749→   749→  const typeInfo = TYPE_LABELS[currentQuestion.type] || { label: 'سؤال', emoji: '❓' };
+   750→   750→
+   751→   751→  /* ═══════════════════════════════════════════════════════════
+   752→   752→     Render
+   753→   753→     ═══════════════════════════════════════════════════════════ */
+   754→   754→  return (
+   755→   755→    <div
+   756→   756→      className="min-h-screen flex flex-col bg-gradient-to-b from-orange-50 via-amber-50/30 to-rose-50 relative overflow-hidden"
+   757→   757→      dir="rtl"
+   758→   758→    >
+   759→   759→      {/* ── Background decorations ── */}
+   760→   760→      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+   761→   761→        {QUIZ_EMOJIS.map((emoji, i) => (
+   762→   762→          <motion.div
+   763→   763→            key={i}
+   764→   764→            className="absolute opacity-[0.15] text-3xl"
+   765→   765→            style={{ left: `${12 + i * 16}%`, top: `${8 + (i % 3) * 32}%` }}
+   766→   766→            animate={{ y: [0, -18, 0], rotate: [0, 12, -12, 0] }}
+   767→   767→            transition={{ duration: 4 + i, repeat: Infinity, delay: i * 0.6 }}
+   768→   768→          >
+   769→   769→            {emoji}
+   770→   770→          </motion.div>
+   771→   771→        ))}
+   772→   772→      </div>
+   773→   773→
+   774→   774→      {/* ═══════ HEADER ═══════ */}
+   775→   775→      <header className="relative z-10 px-4 pt-4 pb-2">
+   776→   776→        <div className="max-w-2xl mx-auto">
+   777→   777→          {/* Top row */}
+   778→   778→          <div className="flex items-center justify-between mb-3">
+   779→   779→            {/* Back button */}
+   780→   780→            <Button
+   781→   781→              variant="ghost"
+   782→   782→              size="icon"
+   783→   783→              onClick={() => setShowExitDialog(true)}
+   784→   784→              className="h-10 w-10 rounded-xl hover:bg-white/60 shrink-0"
+   785→   785→              aria-label="العودة"
+   786→   786→            >
+   787→   787→              <svg
+   788→   788→                xmlns="http://www.w3.org/2000/svg"
+   789→   789→                width="20"
+   790→   790→                height="20"
+   791→   791→                viewBox="0 0 24 24"
+   792→   792→                fill="none"
+   793→   793→                stroke="currentColor"
+   794→   794→                strokeWidth="2.5"
+   795→   795→                strokeLinecap="round"
+   796→   796→                strokeLinejoin="round"
+   797→   797→                className="rotate-180"
+   798→   798→              >
+   799→   799→                <path d="m15 18-6-6 6-6" />
+   800→   800→              </svg>
+   801→   801→            </Button>
+   802→   802→
+   803→   803→            {/* Timer */}
+   804→   804→            <Badge
+   805→   805→              variant="secondary"
+   806→   806→              className="text-sm sm:text-base px-3 py-1.5 rounded-xl font-bold bg-white/80 shadow-sm tabular-nums"
+   807→   807→            >
+   808→   808→              ⏱️ {formatTime(elapsedTime)}
+   809→   809→            </Badge>
+   810→   810→
+   811→   811→            {/* Star counter */}
+   812→   812→            <div className="flex items-center gap-1.5 bg-yellow-100 px-3 py-1.5 rounded-xl shadow-sm">
+   813→   813→              <motion.span
+   814→   814→                className="text-lg"
+   815→   815→                animate={
+   816→   816→                  showStarBurst ? { scale: [1, 1.6, 1], rotate: [0, 20, -20, 0] } : {}
+   817→   817→                }
+   818→   818→                transition={{ duration: 0.5 }}
+   819→   819→              >
+   820→   820→                ⭐
+   821→   821→              </motion.span>
+   822→   822→              <span className="font-bold text-yellow-700 tabular-nums">{sessionStars}</span>
+   823→   823→            </div>
+   824→   824→          </div>
+   825→   825→
+   826→   826→          {/* Progress info */}
+   827→   827→          <div className="space-y-1.5">
+   828→   828→            <div className="flex items-center justify-between text-sm">
+   829→   829→              <span className="font-semibold text-gray-600">
+   830→   830→                {typeInfo.emoji} {typeInfo.label}
+   831→   831→              </span>
+   832→   832→              <span className="font-bold text-gray-700">
+   833→   833→                السؤال {currentQuestionIndex + 1} من {totalQuestions}
+   834→   834→              </span>
+   835→   835→            </div>
+   836→   836→            <Progress
+   837→   837→              value={progressPercent}
+   838→   838→              className="h-3 rounded-full bg-orange-100 [&>div]:bg-gradient-to-l [&>div]:from-orange-400 [&>div]:to-amber-400 [&>div]:rounded-full"
+   839→   839→            />
+   840→   840→          </div>
+   841→   841→        </div>
+   842→   842→      </header>
+   843→   843→
+   844→   844→      {/* ═══════ MAIN QUIZ AREA ═══════ */}
+   845→   845→      <main className="flex-1 relative z-10 px-4 py-4 flex flex-col items-center">
+   846→   846→        <div className="w-full max-w-2xl mx-auto flex-1 flex flex-col">
+   847→   847→          <AnimatePresence mode="wait">
+   848→   848→            <motion.div
+   849→   849→              key={currentQuestionIndex}
+   850→   850→              initial={{ opacity: 0, x: 60 }}
+   851→   851→              animate={{ opacity: 1, x: 0 }}
+   852→   852→              exit={{ opacity: 0, x: -60 }}
+   853→   853→              transition={{ duration: 0.28, ease: 'easeInOut' }}
+   854→   854→              className="flex-1 flex flex-col"
+   855→   855→            >
+   856→   856→              {/* ── Question Card ── */}
+   857→   857→              <Card className="border-0 shadow-lg bg-white/90 backdrop-blur-sm mb-6 relative overflow-visible">
+   858→   858→                <CardContent className="pt-6 pb-6 text-center relative">
+   859→   859→                  {/* Star burst overlay */}
+   860→   860→                  <StarBurst show={showStarBurst} />
+   861→   861→
+   862→   862→                  {/* Question number badge */}
+   863→   863→                  <motion.div
+   864→   864→                    className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-br from-orange-400 to-amber-500 text-white text-2xl font-bold shadow-lg mb-4"
+   865→   865→                    initial={{ scale: 0, rotate: -90 }}
+   866→   866→                    animate={{ scale: 1, rotate: 0 }}
+   867→   867→                    transition={{ type: 'spring', stiffness: 350, damping: 18 }}
+   868→   868→                  >
+   869→   869→                    {currentQuestionIndex + 1}
+   870→   870→                  </motion.div>
+   871→   871→
+   872→   872→                  {/* Question text */}
+   873→   873→                  <h2 className="text-xl sm:text-2xl font-bold text-gray-800 leading-relaxed mb-2">
+   874→   874→                    {currentQuestion.question}
+   875→   875→                  </h2>
+   876→   876→
+   877→   877→                  {/* Hint (before answering) */}
+   878→   878→                  {currentQuestion.hint && !isAnswered && (
+   879→   879→                    <motion.p
+   880→   880→                      initial={{ opacity: 0, y: 10 }}
+   881→   881→                      animate={{ opacity: 1, y: 0 }}
+   882→   882→                      transition={{ delay: 0.3 }}
+   883→   883→                      className="text-sm text-amber-600 mt-2 bg-amber-50 rounded-lg px-4 py-2 inline-block font-medium"
+   884→   884→                    >
+   885→   885→                      💡 {currentQuestion.hint}
+   886→   886→                    </motion.p>
+   887→   887→                  )}
+   888→   888→
+   889→   889→                  {/* Feedback banner */}
+   890→   890→                  {isAnswered && (
+   891→   891→                    <FeedbackBanner isCorrect={isCorrect} encouragement={encouragement} />
+   892→   892→                  )}
+   893→   893→                </CardContent>
+   894→   894→              </Card>
+   895→   895→
+   896→   896→              {/* ── Options Area ── */}
+   897→   897→              <div className="flex-1 flex flex-col justify-center">
+   898→   898→                {currentQuestion.type === 'true_false' ? (
+   899→   899→                  <TrueFalseOptions
+   900→   900→                    options={options}
+   901→   901→                    selectedOption={selectedOption}
+   902→   902→                    isAnswered={isAnswered}
+   903→   903→                    correctAnswer={currentQuestion.correctAnswer}
+   904→   904→                    onSelect={handleSelectOption}
+   905→   905→                  />
+   906→   906→                ) : currentQuestion.type === 'choose_letter' ? (
+   907→   907→                  <LetterOptions
+   908→   908→                    options={options}
+   909→   909→                    selectedOption={selectedOption}
+   910→   910→                    isAnswered={isAnswered}
+   911→   911→                    correctAnswer={currentQuestion.correctAnswer}
+   912→   912→                    onSelect={handleSelectOption}
+   913→   913→                  />
+   914→   914→                ) : currentQuestion.type === 'complete_word' ? (
+   915→   915→                  <CompleteWordOptions
+   916→   916→                    options={options}
+   917→   917→                    selectedOption={selectedOption}
+   918→   918→                    isAnswered={isAnswered}
+   919→   919→                    correctAnswer={currentQuestion.correctAnswer}
+   920→   920→                    onSelect={handleSelectOption}
+   921→   921→                    question={currentQuestion.question}
+   922→   922→                  />
+   923→   923→                ) : (
+   924→   924→                  <StandardOptions
+   925→   925→                    options={options}
+   926→   926→                    selectedOption={selectedOption}
+   927→   927→                    isAnswered={isAnswered}
+   928→   928→                    correctAnswer={currentQuestion.correctAnswer}
+   929→   929→                    onSelect={handleSelectOption}
+   930→   930→                  />
+   931→   931→                )}
+   932→   932→              </div>
+   933→   933→            </motion.div>
+   934→   934→          </AnimatePresence>
+   935→   935→
+   936→   936→          {/* ── Submit Button (after last question) ── */}
+   937→   937→          <AnimatePresence>
+   938→   938→            {showSubmitScreen && (
+   939→   939→              <motion.div
+   940→   940→                initial={{ opacity: 0, y: 30 }}
+   941→   941→                animate={{ opacity: 1, y: 0 }}
+   942→   942→                exit={{ opacity: 0, y: 30 }}
+   943→   943→                className="mt-6 mb-4"
+   944→   944→              >
+   945→   945→                <Button
+   946→   946→                  onClick={handleSubmit}
+   947→   947→                  disabled={isSubmitting}
+   948→   948→                  className="w-full h-16 text-xl font-bold rounded-2xl bg-gradient-to-l from-emerald-500 via-teal-500 to-emerald-600 text-white shadow-lg hover:shadow-xl transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+   949→   949→                >
+   950→   950→                  {isSubmitting ? (
+   951→   951→                    <motion.span
+   952→   952→                      animate={{ rotate: 360 }}
+   953→   953→                      transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+   954→   954→                      className="text-2xl"
+   955→   955→                    >
+   956→   956→                      ⏳
+   957→   957→                    </motion.span>
+   958→   958→                  ) : (
+   959→   959→                    <>
+   960→   960→                      <span className="text-2xl ml-2">📤</span>
+   961→   961→                      إرسال الإجابات
+   962→   962→                    </>
+   963→   963→                  )}
+   964→   964→                </Button>
+   965→   965→                <p className="text-center text-sm text-gray-500 mt-2">
+   966→   966→                  أجبت على جميع الأسئلة! {sessionStars} ⭐
+   967→   967→                </p>
+   968→   968→              </motion.div>
+   969→   969→            )}
+   970→   970→          </AnimatePresence>
+   971→   971→        </div>
+   972→   972→      </main>
+   973→   973→
+   974→   974→      {/* ── Footer ── */}
+   975→   975→      <footer className="mt-auto relative z-10 py-3 text-center">
+   976→   976→        <p className="text-xs text-muted-foreground">
+   977→   977→          🌟 تعلّم العربية - الصف الأول الابتدائي 🌟
+   978→   978→        </p>
+   979→   979→      </footer>
+   980→   980→
+   981→   981→      {/* ═══════ EXIT CONFIRMATION DIALOG ═══════ */}
+   982→   982→      <AlertDialog open={showExitDialog} onOpenChange={setShowExitDialog}>
+   983→   983→        <AlertDialogContent className="rounded-2xl" dir="rtl">
+   984→   984→          <AlertDialogHeader>
+   985→   985→            <AlertDialogTitle className="text-xl text-right flex items-center gap-2">
+   986→   986→              <span>🤔</span>
+   987→   987→              <span>هل تريد الخروج من الاختبار؟</span>
+   988→   988→            </AlertDialogTitle>
+   989→   989→            <AlertDialogDescription className="text-right text-base leading-relaxed">
+   990→   990→              إذا خرجت الآن، ستفقد تقدمك في هذا الاختبار ولن يتم حفظ إجاباتك.
+   991→   991→            </AlertDialogDescription>
+   992→   992→          </AlertDialogHeader>
+   993→   993→          <AlertDialogFooter className="flex-row-reverse gap-3 sm:justify-start">
+   994→   994→            <AlertDialogAction
+   995→   995→              onClick={handleExit}
+   996→   996→              className="rounded-xl bg-red-500 hover:bg-red-600 text-white px-6 font-medium"
+   997→   997→            >
+   998→   998→              نعم، أريد الخروج
+   999→   999→            </AlertDialogAction>
+  1000→  1000→            <AlertDialogCancel className="rounded-xl px-6 font-medium">
+  1001→  1001→              لا، أريد المتابعة
+  1002→  1002→            </AlertDialogCancel>
+  1003→  1003→          </AlertDialogFooter>
+  1004→  1004→        </AlertDialogContent>
+  1005→  1005→      </AlertDialog>
+  1006→  1006→    </div>
+  1007→  1007→  );
+  1008→  1008→}

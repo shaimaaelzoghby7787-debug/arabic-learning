@@ -258,4 +258,26 @@ Stage Summary:
 - 2,090 questions in database across 22 lessons
 - 16 API routes working (student, curriculum, quiz, exam, progress, teacher, TTS, certificate, leaderboard)
 - ESLint clean, dev server stable
-- Screenshots saved: home_view.png, units_view.png, units_view2.png, quiz_view.png
+- Screenshots saved: home_view.png, units_view.png, units_view2.png, quiz_view.png---
+Task ID: 1
+Agent: Main Agent
+Task: Fix Arabic TTS - voice was using Chinese language (tongtong) instead of Arabic
+
+Work Log:
+- Diagnosed the issue: z-ai-web-dev-sdk TTS API uses voices (tongtong, chuichui, etc.) that do NOT support Arabic
+- The "tongtong" voice is Chinese (温暖亲切), causing Arabic letters/words to be mispronounced
+- Created new utility `/src/lib/arabic-tts.ts` using browser-native SpeechSynthesis API
+  - Sets `utterance.lang = "ar-EG"` for proper Egyptian Arabic pronunciation
+  - Voice caching for performance
+  - Slower rate (0.75) appropriate for first-grade children
+  - Proper cleanup and error handling
+- Updated `LessonView.tsx`: Replaced API-based TTS with browser SpeechSynthesis
+- Updated `QuizView.tsx`: Replaced API-based TTS for encouragement phrases
+- Verified via Agent Browser: no JS errors, SpeechSynthesis speaks with correct Arabic lang setting
+
+Stage Summary:
+- Root cause: z-ai-web-dev-sdk TTS has no Arabic voice support (only Chinese, English voices)
+- Solution: Browser-native SpeechSynthesis API with ar-EG locale
+- Files changed: src/lib/arabic-tts.ts (new), src/components/arabic/LessonView.tsx, src/components/arabic/QuizView.tsx
+- TTS API route kept but no longer used by frontend
+

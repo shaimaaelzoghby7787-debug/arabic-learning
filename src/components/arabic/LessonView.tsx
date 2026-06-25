@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { useAppStore } from '@/lib/store';
+import { speakArabic, stopSpeaking, preloadVoices } from '@/lib/arabic-tts';
 
 interface WordData {
   word: string;
@@ -107,7 +108,6 @@ export default function LessonView() {
   const [lessonProgress, setLessonProgress] = useState(0);
   const [startingQuiz, setStartingQuiz] = useState(false);
   const [startingExam, setStartingExam] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const throttleRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchLesson = useCallback(async () => {
@@ -157,60 +157,24 @@ export default function LessonView() {
     fetchLesson();
   }, [fetchLesson]);
 
-  // Cleanup audio on unmount
+  // Preload Arabic voices on mount
   useEffect(() => {
+    preloadVoices();
     return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
+      stopSpeaking();
     };
   }, []);
 
-  const playTTS = useCallback(async (text: string, id?: string) => {
+  const playTTS = useCallback((text: string, id?: string) => {
     const playId = id || text;
     if (playingTTS === playId) return;
     setPlayingTTS(playId);
 
-    try {
-      const res = await fetch('/api/tts/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, speed: 0.8 }),
-      });
-
-      if (!res.ok) {
-        setPlayingTTS(null);
-        return;
-      }
-
-      const blob = await res.blob();
-      if (blob.size < 100) {
-        setPlayingTTS(null);
-        return;
-      }
-
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
-      const audioUrl = URL.createObjectURL(blob);
-      const audio = new Audio(audioUrl);
-      audioRef.current = audio;
-      audio.onended = () => {
-        URL.revokeObjectURL(audioUrl);
-        setPlayingTTS(null);
-      };
-      audio.onerror = () => {
-        URL.revokeObjectURL(audioUrl);
-        setPlayingTTS(null);
-      };
-      audio.play().catch(() => {
-        URL.revokeObjectURL(audioUrl);
-        setPlayingTTS(null);
-      });
-    } catch {
-      setPlayingTTS(null);
-    }
+    speakArabic(text, {
+      rate: 0.75,
+      onEnd: () => setPlayingTTS(null),
+      onError: () => setPlayingTTS(null),
+    });
   }, [playingTTS]);
 
   // Throttle TTS: prevent rapid consecutive calls
@@ -219,7 +183,7 @@ export default function LessonView() {
     throttleRef.current = window.setTimeout(() => {
       playTTS(text, id);
       throttleRef.current = null;
-    }, 500);
+    }, 300);
   }, [playTTS]);
 
   const handleStartTraining = useCallback(async () => {
