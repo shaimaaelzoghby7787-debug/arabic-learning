@@ -1,0 +1,672 @@
+     1→'use client';
+     2→
+     3→import { useState, useEffect, useCallback, useRef } from 'react';
+     4→import { motion, AnimatePresence } from 'framer-motion';
+     5→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+     6→import { Button } from '@/components/ui/button';
+     7→import { Progress } from '@/components/ui/progress';
+     8→import { Badge } from '@/components/ui/badge';
+     9→import { useAppStore } from '@/lib/store';
+    10→
+    11→interface WordData {
+    12→  word: string;
+    13→  meaning?: string;
+    14→}
+    15→
+    16→interface LessonData {
+    17→  id: string;
+    18→  title: string;
+    19→  letter: string;
+    20→  objectives: string;
+    21→  words: WordData[];
+    22→  explanation: string;
+    23→  tip: string;
+    24→  unit: {
+    25→    id: string;
+    26→    title: string;
+    27→    order: number;
+    28→  };
+    29→  questionCount: number;
+    30→  questionTypes: Array<{ type: string; count: number }>;
+    31→}
+    32→
+    33→const DIACRITICS = [
+    34→  { label: 'فتحة', symbol: 'َ', emoji: '⬆️' },
+    35→  { label: 'ضمة', symbol: 'ُ', emoji: '↗️' },
+    36→  { label: 'كسرة', symbol: 'ِ', emoji: '⬇️' },
+    37→  { label: 'سكون', symbol: 'ْ', emoji: '⏸️' },
+    38→];
+    39→
+    40→function FlipCard({ word, meaning, onPlay }: { word: string; meaning?: string; onPlay: (text: string) => void }) {
+    41→  const [flipped, setFlipped] = useState(false);
+    42→
+    43→  return (
+    44→    <motion.div
+    45→      className="perspective-500 cursor-pointer"
+    46→      onClick={() => setFlipped(!flipped)}
+    47→      whileHover={{ scale: 1.03 }}
+    48→      whileTap={{ scale: 0.97 }}
+    49→    >
+    50→      <div className="relative w-full h-28">
+    51→        <AnimatePresence mode="wait">
+    52→          {!flipped ? (
+    53→            <motion.div
+    54→              key="front"
+    55→              initial={{ rotateY: 0 }}
+    56→              animate={{ rotateY: 0 }}
+    57→              exit={{ rotateY: -90 }}
+    58→              transition={{ duration: 0.2 }}
+    59→              className="absolute inset-0 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-md flex flex-col items-center justify-center text-white p-3"
+    60→            >
+    61→              <span className="text-3xl font-bold mb-1">{word}</span>
+    62→              <span className="text-xs opacity-70">اضغط للكشف 🔍</span>
+    63→              <button
+    64→                onClick={(e) => {
+    65→                  e.stopPropagation();
+    66→                  onPlay(word);
+    67→                }}
+    68→                className="absolute top-2 left-2 text-lg bg-white/20 rounded-full w-7 h-7 flex items-center justify-center hover:bg-white/30 transition-colors"
+    69→                aria-label="استمع للكلمة"
+    70→              >
+    71→                🔊
+    72→              </button>
+    73→            </motion.div>
+    74→          ) : (
+    75→            <motion.div
+    76→              key="back"
+    77→              initial={{ rotateY: 90 }}
+    78→              animate={{ rotateY: 0 }}
+    79→              exit={{ rotateY: 90 }}
+    80→              transition={{ duration: 0.2 }}
+    81→              className="absolute inset-0 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 shadow-md flex flex-col items-center justify-center text-white p-3"
+    82→            >
+    83→              <span className="text-2xl font-bold mb-1">{word}</span>
+    84→              {meaning && <span className="text-sm opacity-90">{meaning}</span>}
+    85→              <span className="text-xs opacity-70 mt-1">اضغط للرجوع ↩️</span>
+    86→            </motion.div>
+    87→          )}
+    88→        </AnimatePresence>
+    89→      </div>
+    90→    </motion.div>
+    91→  );
+    92→}
+    93→
+    94→export default function LessonView() {
+    95→  const {
+    96→    studentId,
+    97→    currentLessonId,
+    98→    currentUnitTitle,
+    99→    navigate,
+   100→    setQuiz,
+   101→  } = useAppStore();
+   102→
+   103→  const [lesson, setLessonData] = useState<LessonData | null>(null);
+   104→  const [loading, setLoading] = useState(true);
+   105→  const [error, setError] = useState('');
+   106→  const [playingTTS, setPlayingTTS] = useState<string | null>(null);
+   107→  const [lessonProgress, setLessonProgress] = useState(0);
+   108→  const [startingQuiz, setStartingQuiz] = useState(false);
+   109→  const [startingExam, setStartingExam] = useState(false);
+   110→  const audioRef = useRef<HTMLAudioElement | null>(null);
+   111→
+   112→  const fetchLesson = useCallback(async () => {
+   113→    if (!currentLessonId) return;
+   114→    setLoading(true);
+   115→    setError('');
+   116→    try {
+   117→      const res = await fetch(`/api/curriculum/lesson/${currentLessonId}`);
+   118→      if (!res.ok) {
+   119→        setError('تعذر تحميل الدرس');
+   120→        setLoading(false);
+   121→        return;
+   122→      }
+   123→      const data = await res.json();
+   124→      setLessonData(data);
+   125→
+   126→      // Fetch progress for this lesson
+   127→      if (studentId) {
+   128→        const progRes = await fetch(`/api/progress/${studentId}`);
+   129→        if (progRes.ok) {
+   130→          const progData = await progRes.json();
+   131→          const allProgressUnits = progData.units as Array<{
+   132→            unitId: string;
+   133→            lessons: Array<{ lessonId: string; bestScore: number; completed: boolean }>;
+   134→          }>;
+   135→          let found = false;
+   136→          for (const unit of allProgressUnits) {
+   137→            for (const l of unit.lessons) {
+   138→              if (l.lessonId === currentLessonId) {
+   139→                setLessonProgress(l.bestScore || 0);
+   140→                found = true;
+   141→                break;
+   142→              }
+   143→            }
+   144→            if (found) break;
+   145→          }
+   146→        }
+   147→      }
+   148→    } catch {
+   149→      setError('تعذر الاتصال بالخادم');
+   150→    } finally {
+   151→      setLoading(false);
+   152→    }
+   153→  }, [currentLessonId, studentId]);
+   154→
+   155→  useEffect(() => {
+   156→    fetchLesson();
+   157→  }, [fetchLesson]);
+   158→
+   159→  // Cleanup audio on unmount
+   160→  useEffect(() => {
+   161→    return () => {
+   162→      if (audioRef.current) {
+   163→        audioRef.current.pause();
+   164→        audioRef.current = null;
+   165→      }
+   166→    };
+   167→  }, []);
+   168→
+   169→  const playTTS = useCallback(async (text: string, id?: string) => {
+   170→    const playId = id || text;
+   171→    if (playingTTS === playId) return;
+   172→    setPlayingTTS(playId);
+   173→
+   174→    try {
+   175→      const res = await fetch('/api/tts/speak', {
+   176→        method: 'POST',
+   177→        headers: { 'Content-Type': 'application/json' },
+   178→        body: JSON.stringify({ text }),
+   179→      });
+   180→
+   181→      if (!res.ok) {
+   182→        setPlayingTTS(null);
+   183→        return;
+   184→      }
+   185→
+   186→      const data = await res.json();
+   187→      if (data.audio) {
+   188→        if (audioRef.current) {
+   189→          audioRef.current.pause();
+   190→        }
+   191→        const audio = new Audio(`data:audio/mp3;base64,${data.audio}`);
+   192→        audioRef.current = audio;
+   193→        audio.onended = () => setPlayingTTS(null);
+   194→        audio.onerror = () => setPlayingTTS(null);
+   195→        audio.play().catch(() => setPlayingTTS(null));
+   196→      } else if (data.audioUrl) {
+   197→        if (audioRef.current) {
+   198→          audioRef.current.pause();
+   199→        }
+   200→        const audio = new Audio(data.audioUrl);
+   201→        audioRef.current = audio;
+   202→        audio.onended = () => setPlayingTTS(null);
+   203→        audio.onerror = () => setPlayingTTS(null);
+   204→        audio.play().catch(() => setPlayingTTS(null));
+   205→      } else {
+   206→        setPlayingTTS(null);
+   207→      }
+   208→    } catch {
+   209→      setPlayingTTS(null);
+   210→    }
+   211→  }, [playingTTS]);
+   212→
+   213→  const handleStartTraining = useCallback(async () => {
+   214→    if (!currentLessonId) return;
+   215→    setStartingQuiz(true);
+   216→    try {
+   217→      const res = await fetch('/api/quiz/generate', {
+   218→        method: 'POST',
+   219→        headers: { 'Content-Type': 'application/json' },
+   220→        body: JSON.stringify({ lessonId: currentLessonId, count: 20 }),
+   221→      });
+   222→      const data = await res.json();
+   223→      if (!res.ok || !data.questions) {
+   224→        setStartingQuiz(false);
+   225→        return;
+   226→      }
+   227→      setQuiz(data.questions, 'lesson_quiz');
+   228→      navigate('quiz');
+   229→    } catch {
+   230→      setStartingQuiz(false);
+   231→    }
+   232→  }, [currentLessonId, setQuiz, navigate]);
+   233→
+   234→  const handleStartExam = useCallback(async () => {
+   235→    if (!currentLessonId) return;
+   236→    setStartingExam(true);
+   237→    try {
+   238→      const res = await fetch('/api/quiz/generate', {
+   239→        method: 'POST',
+   240→        headers: { 'Content-Type': 'application/json' },
+   241→        body: JSON.stringify({ lessonId: currentLessonId, count: 25 }),
+   242→      });
+   243→      const data = await res.json();
+   244→      if (!res.ok || !data.questions) {
+   245→        setStartingExam(false);
+   246→        return;
+   247→      }
+   248→      setQuiz(data.questions, 'lesson_quiz');
+   249→      navigate('quiz');
+   250→    } catch {
+   251→      setStartingExam(false);
+   252→    }
+   253→  }, [currentLessonId, setQuiz, navigate]);
+   254→
+   255→  if (loading) {
+   256→    return (
+   257→      <div className="min-h-screen flex flex-col bg-gradient-to-b from-indigo-50 via-white to-purple-50">
+   258→        <div className="flex-1 flex items-center justify-center">
+   259→          <motion.div
+   260→            animate={{ rotate: 360 }}
+   261→            transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
+   262→            className="text-6xl"
+   263→          >
+   264→            ✏️
+   265→          </motion.div>
+   266→        </div>
+   267→        <footer className="mt-auto py-4 text-center">
+   268→          <p className="text-xs text-muted-foreground">🌟 تعلّم العربية - الصف الأول الابتدائي 🌟</p>
+   269→        </footer>
+   270→      </div>
+   271→    );
+   272→  }
+   273→
+   274→  if (error || !lesson) {
+   275→    return (
+   276→      <div className="min-h-screen flex flex-col bg-gradient-to-b from-indigo-50 via-white to-purple-50">
+   277→        <main className="flex-1 flex flex-col items-center justify-center gap-4 p-4">
+   278→          <span className="text-6xl">😕</span>
+   279→          <p className="text-lg text-gray-600 text-center">{error || 'لم يتم العثور على الدرس'}</p>
+   280→          <Button
+   281→            onClick={() => navigate('units')}
+   282→            className="rounded-xl bg-indigo-500 hover:bg-indigo-600"
+   283→          >
+   284→            العودة للوحدات
+   285→          </Button>
+   286→        </main>
+   287→        <footer className="mt-auto py-4 text-center">
+   288→          <p className="text-xs text-muted-foreground">🌟 تعلّم العربية - الصف الأول الابتدائي 🌟</p>
+   289→        </footer>
+   290→      </div>
+   291→    );
+   292→  }
+   293→
+   294→  const objectives = lesson.objectives
+   295→    ? (typeof lesson.objectives === 'string'
+   296→        ? JSON.parse(lesson.objectives)
+   297→        : lesson.objectives) as string[]
+   298→    : [];
+   299→
+   300→  const words: WordData[] = Array.isArray(lesson.words) ? lesson.words : [];
+   301→
+   302→  return (
+   303→    <div className="min-h-screen flex flex-col bg-gradient-to-b from-indigo-50 via-white to-purple-50">
+   304→      {/* Header */}
+   305→      <header className="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b border-gray-100 shadow-sm">
+   306→        <div className="max-w-2xl mx-auto px-4 py-3">
+   307→          <div className="flex items-center gap-3">
+   308→            <Button
+   309→              variant="ghost"
+   310→              size="sm"
+   311→              onClick={() => navigate('units')}
+   312→              className="text-gray-500 hover:text-indigo-600 flex-shrink-0"
+   313→            >
+   314→              <span className="text-lg ml-1">→</span>
+   315→              <span className="text-sm">رجوع</span>
+   316→            </Button>
+   317→            <div className="flex-1 min-w-0 text-right">
+   318→              <h1 className="text-sm font-bold text-gray-800 truncate">{lesson.title}</h1>
+   319→              <p className="text-xs text-gray-400 truncate">{currentUnitTitle}</p>
+   320→            </div>
+   321→          </div>
+   322→        </div>
+   323→      </header>
+   324→
+   325→      {/* Scrollable content */}
+   326→      <main className="flex-1 px-4 py-4 max-w-2xl mx-auto w-full">
+   327→        <div className="space-y-4">
+   328→          {/* 1. Lesson header with large letter */}
+   329→          <motion.div
+   330→            initial={{ opacity: 0, y: 20 }}
+   331→            animate={{ opacity: 1, y: 0 }}
+   332→          >
+   333→            <Card className="border-0 shadow-lg bg-gradient-to-br from-indigo-500 via-purple-500 to-indigo-600 text-white overflow-hidden">
+   334→              <CardContent className="pt-8 pb-8 text-center relative">
+   335→                {/* Decorative circles */}
+   336→                <div className="absolute top-0 left-0 w-32 h-32 bg-white/10 rounded-full -translate-x-1/2 -translate-y-1/2" />
+   337→                <div className="absolute bottom-0 right-0 w-24 h-24 bg-white/10 rounded-full translate-x-1/2 translate-y-1/2" />
+   338→
+   339→                <div className="relative z-10">
+   340→                  <motion.h2
+   341→                    className="text-2xl font-bold mb-3"
+   342→                    initial={{ opacity: 0 }}
+   343→                    animate={{ opacity: 1 }}
+   344→                    transition={{ delay: 0.2 }}
+   345→                  >
+   346→                    {lesson.title}
+   347→                  </motion.h2>
+   348→                  {lesson.letter && (
+   349→                    <motion.div
+   350→                      className="text-8xl font-bold my-4 drop-shadow-lg"
+   351→                      initial={{ scale: 0 }}
+   352→                      animate={{ scale: 1 }}
+   353→                      transition={{ type: 'spring', stiffness: 200, delay: 0.3 }}
+   354→                    >
+   355→                      {lesson.letter}
+   356→                    </motion.div>
+   357→                  )}
+   358→                  <p className="text-white/70 text-sm">{currentUnitTitle}</p>
+   359→                </div>
+   360→              </CardContent>
+   361→            </Card>
+   362→          </motion.div>
+   363→
+   364→          {/* 2. Objectives */}
+   365→          {objectives.length > 0 && (
+   366→            <motion.div
+   367→              initial={{ opacity: 0, y: 20 }}
+   368→              animate={{ opacity: 1, y: 0 }}
+   369→              transition={{ delay: 0.1 }}
+   370→            >
+   371→              <Card className="border-0 shadow-md bg-white/80 backdrop-blur-sm">
+   372→                <CardHeader className="pb-2 pt-4 px-5">
+   373→                  <CardTitle className="text-base flex items-center gap-2 text-indigo-700">
+   374→                    <span>🎯</span>
+   375→                    أهداف الدرس
+   376→                  </CardTitle>
+   377→                </CardHeader>
+   378→                <CardContent className="px-5 pb-4">
+   379→                  <ul className="space-y-2">
+   380→                    {objectives.map((obj, i) => (
+   381→                      <motion.li
+   382→                        key={i}
+   383→                        className="flex items-start gap-2 text-sm text-gray-700"
+   384→                        initial={{ opacity: 0, x: -10 }}
+   385→                        animate={{ opacity: 1, x: 0 }}
+   386→                        transition={{ delay: 0.15 + i * 0.05 }}
+   387→                      >
+   388→                        <span className="text-emerald-500 mt-0.5 flex-shrink-0">✓</span>
+   389→                        <span>{obj}</span>
+   390→                      </motion.li>
+   391→                    ))}
+   392→                  </ul>
+   393→                </CardContent>
+   394→              </Card>
+   395→            </motion.div>
+   396→          )}
+   397→
+   398→          {/* 3. The Letter with diacritics */}
+   399→          {lesson.letter && (
+   400→            <motion.div
+   401→              initial={{ opacity: 0, y: 20 }}
+   402→              animate={{ opacity: 1, y: 0 }}
+   403→              transition={{ delay: 0.2 }}
+   404→            >
+   405→              <Card className="border-0 shadow-md bg-white/80 backdrop-blur-sm">
+   406→                <CardHeader className="pb-2 pt-4 px-5">
+   407→                  <CardTitle className="text-base flex items-center gap-2 text-purple-700">
+   408→                    <span>🔤</span>
+   409→                    الحرف
+   410→                  </CardTitle>
+   411→                </CardHeader>
+   412→                <CardContent className="px-5 pb-5">
+   413→                  <div className="grid grid-cols-4 gap-3">
+   414→                    {DIACRITICS.map((d, i) => (
+   415→                      <motion.button
+   416→                        key={d.label}
+   417→                        className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-gradient-to-b from-purple-50 to-white border-2 border-purple-100 hover:border-purple-300 hover:shadow-md transition-all active:scale-95"
+   418→                        whileHover={{ scale: 1.05 }}
+   419→                        whileTap={{ scale: 0.95 }}
+   420→                        onClick={() => playTTS(lesson.letter + d.symbol, `diacritic-${i}`)}
+   421→                        initial={{ opacity: 0, y: 10 }}
+   422→                        animate={{ opacity: 1, y: 0 }}
+   423→                        transition={{ delay: 0.25 + i * 0.08 }}
+   424→                      >
+   425→                        <span className="text-3xl font-bold text-purple-700">
+   426→                          {lesson.letter}{d.symbol}
+   427→                        </span>
+   428→                        <span className="text-[10px] text-gray-500">{d.label}</span>
+   429→                        {playingTTS === `diacritic-${i}` ? (
+   430→                          <motion.span
+   431→                            className="text-sm"
+   432→                            animate={{ scale: [1, 1.3, 1] }}
+   433→                            transition={{ duration: 0.5, repeat: Infinity }}
+   434→                          >
+   435→                            🔊
+   436→                          </motion.span>
+   437→                        ) : (
+   438→                          <span className="text-sm">{d.emoji}</span>
+   439→                        )}
+   440→                      </motion.button>
+   441→                    ))}
+   442→                  </div>
+   443→                </CardContent>
+   444→              </Card>
+   445→            </motion.div>
+   446→          )}
+   447→
+   448→          {/* 4. Pronunciation - TTS */}
+   449→          {lesson.letter && (
+   450→            <motion.div
+   451→              initial={{ opacity: 0, y: 20 }}
+   452→              animate={{ opacity: 1, y: 0 }}
+   453→              transition={{ delay: 0.3 }}
+   454→            >
+   455→              <Card className="border-0 shadow-md bg-gradient-to-l from-blue-500 to-indigo-500 text-white overflow-hidden">
+   456→                <CardContent className="py-6 flex flex-col items-center gap-3">
+   457→                  <span className="text-sm font-medium opacity-90">نطق الحرف 🔊</span>
+   458→                  <motion.button
+   459→                    onClick={() => playTTS(lesson.letter, 'letter-tts')}
+   460→                    className="w-20 h-20 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-4xl hover:bg-white/30 transition-colors active:scale-90"
+   461→                    whileTap={{ scale: 0.9 }}
+   462→                  >
+   463→                    {playingTTS === 'letter-tts' ? (
+   464→                      <motion.span
+   465→                        animate={{ scale: [1, 1.2, 1] }}
+   466→                        transition={{ duration: 0.5, repeat: Infinity }}
+   467→                      >
+   468→                        🔊
+   469→                      </motion.span>
+   470→                    ) : (
+   471→                      '▶️'
+   472→                    )}
+   473→                  </motion.button>
+   474→                  <span className="text-2xl font-bold">{lesson.letter}</span>
+   475→                </CardContent>
+   476→              </Card>
+   477→            </motion.div>
+   478→          )}
+   479→
+   480→          {/* 5. Lesson Words - Flip Cards */}
+   481→          {words.length > 0 && (
+   482→            <motion.div
+   483→              initial={{ opacity: 0, y: 20 }}
+   484→              animate={{ opacity: 1, y: 0 }}
+   485→              transition={{ delay: 0.4 }}
+   486→            >
+   487→              <Card className="border-0 shadow-md bg-white/80 backdrop-blur-sm">
+   488→                <CardHeader className="pb-2 pt-4 px-5">
+   489→                  <CardTitle className="text-base flex items-center gap-2 text-emerald-700">
+   490→                    <span>📝</span>
+   491→                    كلمات الدرس
+   492→                  </CardTitle>
+   493→                </CardHeader>
+   494→                <CardContent className="px-5 pb-5">
+   495→                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+   496→                    {words.map((w, i) => (
+   497→                      <motion.div
+   498→                        key={i}
+   499→                        initial={{ opacity: 0, y: 15 }}
+   500→                        animate={{ opacity: 1, y: 0 }}
+   501→                        transition={{ delay: 0.45 + i * 0.06 }}
+   502→                      >
+   503→                        <FlipCard
+   504→                          word={w.word}
+   505→                          meaning={w.meaning}
+   506→                          onPlay={playTTS}
+   507→                        />
+   508→                      </motion.div>
+   509→                    ))}
+   510→                  </div>
+   511→                </CardContent>
+   512→              </Card>
+   513→            </motion.div>
+   514→          )}
+   515→
+   516→          {/* 6. Explanation */}
+   517→          {lesson.explanation && (
+   518→            <motion.div
+   519→              initial={{ opacity: 0, y: 20 }}
+   520→              animate={{ opacity: 1, y: 0 }}
+   521→              transition={{ delay: 0.5 }}
+   522→            >
+   523→              <Card className="border-0 shadow-md bg-white/80 backdrop-blur-sm">
+   524→                <CardHeader className="pb-2 pt-4 px-5">
+   525→                  <CardTitle className="text-base flex items-center gap-2 text-amber-700">
+   526→                    <span>💡</span>
+   527→                    الشرح
+   528→                  </CardTitle>
+   529→                </CardHeader>
+   530→                <CardContent className="px-5 pb-5">
+   531→                  <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">
+   532→                    {lesson.explanation}
+   533→                  </p>
+   534→                </CardContent>
+   535→              </Card>
+   536→            </motion.div>
+   537→          )}
+   538→
+   539→          {/* 7. Tip */}
+   540→          {lesson.tip && (
+   541→            <motion.div
+   542→              initial={{ opacity: 0, y: 20 }}
+   543→              animate={{ opacity: 1, y: 0 }}
+   544→              transition={{ delay: 0.55 }}
+   545→            >
+   546→              <Card className="border-0 shadow-md bg-gradient-to-l from-amber-50 to-yellow-50 border-amber-200 border-2">
+   547→                <CardContent className="py-4 px-5 flex items-start gap-3">
+   548→                  <span className="text-2xl flex-shrink-0">💡</span>
+   549→                  <p className="text-sm text-amber-800 leading-relaxed">{lesson.tip}</p>
+   550→                </CardContent>
+   551→              </Card>
+   552→            </motion.div>
+   553→          )}
+   554→
+   555→          {/* 8. Summary card */}
+   556→          <motion.div
+   557→            initial={{ opacity: 0, y: 20 }}
+   558→            animate={{ opacity: 1, y: 0 }}
+   559→            transition={{ delay: 0.6 }}
+   560→          >
+   561→            <Card className="border-0 shadow-md bg-white/80 backdrop-blur-sm">
+   562→              <CardHeader className="pb-2 pt-4 px-5">
+   563→                <CardTitle className="text-base flex items-center gap-2 text-indigo-700">
+   564→                  <span>📋</span>
+   565→                  ملخص الدرس
+   566→                </CardTitle>
+   567→              </CardHeader>
+   568→              <CardContent className="px-5 pb-5 space-y-3">
+   569→                <div className="flex items-center justify-between text-sm">
+   570→                  <Badge variant="secondary" className="bg-indigo-100 text-indigo-700">
+   571→                    {lesson.letter || '—'}
+   572→                  </Badge>
+   573→                  <span className="text-gray-500">الحرف</span>
+   574→                </div>
+   575→                <div className="flex items-center justify-between text-sm">
+   576→                  <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
+   577→                    {words.length} كلمة
+   578→                  </Badge>
+   579→                  <span className="text-gray-500">عدد الكلمات</span>
+   580→                </div>
+   581→                <div className="flex items-center justify-between text-sm">
+   582→                  <Badge variant="secondary" className="bg-purple-100 text-purple-700">
+   583→                    {lesson.questionCount} سؤال
+   584→                  </Badge>
+   585→                  <span className="text-gray-500">الأسئلة المتاحة</span>
+   586→                </div>
+   587→              </CardContent>
+   588→            </Card>
+   589→          </motion.div>
+   590→
+   591→          {/* 9. Progress */}
+   592→          {studentId && (
+   593→            <motion.div
+   594→              initial={{ opacity: 0, y: 20 }}
+   595→              animate={{ opacity: 1, y: 0 }}
+   596→              transition={{ delay: 0.65 }}
+   597→            >
+   598→              <Card className="border-0 shadow-md bg-white/80 backdrop-blur-sm">
+   599→                <CardContent className="py-4 px-5">
+   600→                  <div className="flex items-center justify-between mb-2">
+   601→                    <span className="text-xs font-bold text-indigo-600">
+   602→                      {lessonProgress}%
+   603→                    </span>
+   604→                    <span className="text-sm font-medium text-gray-600">تقدمك في هذا الدرس 📊</span>
+   605→                  </div>
+   606→                  <Progress value={lessonProgress} className="h-3" />
+   607→                </CardContent>
+   608→              </Card>
+   609→            </motion.div>
+   610→          )}
+   611→
+   612→          {/* 10. Action Buttons */}
+   613→          <motion.div
+   614→            className="space-y-3 pb-4"
+   615→            initial={{ opacity: 0, y: 20 }}
+   616→            animate={{ opacity: 1, y: 0 }}
+   617→            transition={{ delay: 0.7 }}
+   618→          >
+   619→            <Button
+   620→              onClick={handleStartTraining}
+   621→              disabled={startingQuiz || startingExam}
+   622→              className="w-full h-14 text-base font-bold rounded-2xl bg-gradient-to-l from-emerald-500 to-teal-500 text-white shadow-lg hover:shadow-xl transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
+   623→            >
+   624→              {startingQuiz ? (
+   625→                <motion.span
+   626→                  animate={{ rotate: 360 }}
+   627→                  transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+   628→                  className="text-xl"
+   629→                >
+   630→                  ⏳
+   631→                </motion.span>
+   632→              ) : (
+   633→                <>
+   634→                  <span className="text-xl ml-2">✏️</span>
+   635→                  ابدأ التدريب (٢٠ سؤال)
+   636→                </>
+   637→              )}
+   638→            </Button>
+   639→
+   640→            <Button
+   641→              onClick={handleStartExam}
+   642→              disabled={startingQuiz || startingExam}
+   643→              className="w-full h-14 text-base font-bold rounded-2xl bg-gradient-to-l from-indigo-500 to-purple-500 text-white shadow-lg hover:shadow-xl transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
+   644→            >
+   645→              {startingExam ? (
+   646→                <motion.span
+   647→                  animate={{ rotate: 360 }}
+   648→                  transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+   649→                  className="text-xl"
+   650→                >
+   651→                  ⏳
+   652→                </motion.span>
+   653→              ) : (
+   654→                <>
+   655→                  <span className="text-xl ml-2">📝</span>
+   656→                  اختبار الدرس (٢٥ سؤال)
+   657→                </>
+   658→              )}
+   659→            </Button>
+   660→          </motion.div>
+   661→        </div>
+   662→      </main>
+   663→
+   664→      {/* Sticky footer */}
+   665→      <footer className="mt-auto py-4 text-center">
+   666→        <p className="text-xs text-muted-foreground">🌟 تعلّم العربية - الصف الأول الابتدائي 🌟</p>
+   667→      </footer>
+   668→    </div>
+   669→  );
+   670→}
+   671→
+   672→

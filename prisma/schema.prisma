@@ -1,0 +1,127 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Student {
+  id              String   @id @default(cuid())
+  name            String
+  avatar          String   @default("🧒")
+  xp              Int      @default(0)
+  stars           Int      @default(0)
+  level           Int      @default(1)
+  isTeacher       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  progress        Progress[]
+  attempts        Attempt[]
+  achievements    StudentAchievement[]
+  certificates    Certificate[]
+}
+
+model Unit {
+  id          String   @id @default(cuid())
+  order       Int
+  title       String
+  description String
+  lessons     Lesson[]
+}
+
+model Lesson {
+  id          String   @id @default(cuid())
+  unitId      String
+  unit        Unit     @relation(fields: [unitId], references: [id])
+  order       Int
+  title       String
+  letter      String
+  objectives  String
+  content     String
+  story       String   @default("")
+  song        String   @default("")
+  words       String
+  tip         String   @default("")
+  questions   QuestionBank[]
+}
+
+model QuestionBank {
+  id          String   @id @default(cuid())
+  lessonId    String
+  lesson      Lesson   @relation(fields: [lessonId], references: [id])
+  type        String   // multiple_choice, match_image_word, choose_letter, complete_word, order_letters, order_words, true_false, listen_choose, drag_drop
+  question    String
+  options     String   // JSON array of options
+  correctAnswer String
+  imageUrl    String   @default("")
+  difficulty  Int      @default(1)
+  hint        String   @default("")
+}
+
+model Progress {
+  id              String   @id @default(cuid())
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id])
+  lessonId        String
+  completed       Boolean  @default(false)
+  xpEarned        Int      @default(0)
+  starsEarned     Int      @default(0)
+  bestScore       Int      @default(0)
+  attempts        Int      @default(0)
+  lastAttemptAt   DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([studentId, lessonId])
+}
+
+model Attempt {
+  id              String   @id @default(cuid())
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id])
+  lessonId        String   @default("")
+  unitId          String   @default("")
+  type            String   // lesson_quiz, unit_exam, final_exam
+  score           Int
+  totalQuestions  Int
+  correctAnswers  Int
+  wrongAnswers    Int
+  timeSpent       Int      @default(0)
+  starsEarned     Int      @default(0)
+  xpEarned        Int      @default(0)
+  answers         String   // JSON
+  createdAt       DateTime @default(now())
+}
+
+model Achievement {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  title       String
+  description String
+  icon        String
+  xpReward    Int      @default(0)
+  students    StudentAchievement[]
+}
+
+model StudentAchievement {
+  id            String     @id @default(cuid())
+  studentId     String
+  student       Student     @relation(fields: [studentId], references: [id])
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+  unlockedAt    DateTime    @default(now())
+
+  @@unique([studentId, achievementId])
+}
+
+model Certificate {
+  id            String   @id @default(cuid())
+  studentId     String
+  student       Student  @relation(fields: [studentId], references: [id])
+  certificateNo String   @unique
+  score         Int
+  level         String
+  issuedAt      DateTime @default(now())
+}
