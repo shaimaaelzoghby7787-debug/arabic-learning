@@ -625,15 +625,19 @@ export default function QuizView() {
       const res = await fetch('/api/tts/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: phrase }),
+        body: JSON.stringify({ text: phrase, speed: 0.8 }),
       });
-      const data = await res.json();
-      const src = data.audio ? `data:audio/mp3;base64,${data.audio}` : data.audioUrl || '';
-      if (!src) return;
-      const audio = new Audio(src);
+      if (!res.ok) return;
+      const blob = await res.blob();
+      if (blob.size < 100) return;
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
       audioRef.current = audio;
+      audio.onended = () => URL.revokeObjectURL(audioUrl);
+      audio.onerror = () => URL.revokeObjectURL(audioUrl);
       audio.play().catch(() => {
         /* silently fail – autoplay may be blocked */
+        URL.revokeObjectURL(audioUrl);
       });
     } catch {
       /* silently fail */

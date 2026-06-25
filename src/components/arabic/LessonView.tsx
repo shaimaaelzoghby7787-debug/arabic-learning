@@ -108,6 +108,7 @@ export default function LessonView() {
   const [startingQuiz, setStartingQuiz] = useState(false);
   const [startingExam, setStartingExam] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const throttleRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchLesson = useCallback(async () => {
     if (!currentLessonId) return;
@@ -175,7 +176,7 @@ export default function LessonView() {
       const res = await fetch('/api/tts/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, speed: 0.8 }),
       });
 
       if (!res.ok) {
@@ -183,32 +184,43 @@ export default function LessonView() {
         return;
       }
 
-      const data = await res.json();
-      if (data.audio) {
-        if (audioRef.current) {
-          audioRef.current.pause();
-        }
-        const audio = new Audio(`data:audio/mp3;base64,${data.audio}`);
-        audioRef.current = audio;
-        audio.onended = () => setPlayingTTS(null);
-        audio.onerror = () => setPlayingTTS(null);
-        audio.play().catch(() => setPlayingTTS(null));
-      } else if (data.audioUrl) {
-        if (audioRef.current) {
-          audioRef.current.pause();
-        }
-        const audio = new Audio(data.audioUrl);
-        audioRef.current = audio;
-        audio.onended = () => setPlayingTTS(null);
-        audio.onerror = () => setPlayingTTS(null);
-        audio.play().catch(() => setPlayingTTS(null));
-      } else {
+      const blob = await res.blob();
+      if (blob.size < 100) {
         setPlayingTTS(null);
+        return;
       }
+
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        setPlayingTTS(null);
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(audioUrl);
+        setPlayingTTS(null);
+      };
+      audio.play().catch(() => {
+        URL.revokeObjectURL(audioUrl);
+        setPlayingTTS(null);
+      });
     } catch {
       setPlayingTTS(null);
     }
   }, [playingTTS]);
+
+  // Throttle TTS: prevent rapid consecutive calls
+  const throttledPlayTTS = useCallback((text: string, id?: string) => {
+    if (throttleRef.current) clearTimeout(throttleRef.current);
+    throttleRef.current = window.setTimeout(() => {
+      playTTS(text, id);
+      throttleRef.current = null;
+    }, 500);
+  }, [playTTS]);
 
   const handleStartTraining = useCallback(async () => {
     if (!currentLessonId) return;
@@ -421,7 +433,7 @@ export default function LessonView() {
                         className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-gradient-to-b from-purple-50 to-white border-2 border-purple-100 hover:border-purple-300 hover:shadow-md transition-all active:scale-95"
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
-                        onClick={() => playTTS(lesson.letter + d.symbol, `diacritic-${i}`)}
+                        onClick={() => throttledPlayTTS(lesson.letter + d.symbol, `diacritic-${i}`)}
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.25 + i * 0.08 }}
@@ -460,7 +472,7 @@ export default function LessonView() {
                 <CardContent className="py-6 flex flex-col items-center gap-3">
                   <span className="text-sm font-medium opacity-90">نطق الحرف 🔊</span>
                   <motion.button
-                    onClick={() => playTTS(lesson.letter, 'letter-tts')}
+                    onClick={() => throttledPlayTTS(lesson.letter, 'letter-tts')}
                     className="w-20 h-20 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center text-4xl hover:bg-white/30 transition-colors active:scale-90"
                     whileTap={{ scale: 0.9 }}
                   >
