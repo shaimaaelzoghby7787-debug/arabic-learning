@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useMemo } from 'react';
+import { Suspense, useMemo, useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { useAppStore } from '@/lib/store';
 
@@ -73,7 +73,7 @@ const views: Record<string, React.ComponentType> = {
   certificate: UnitsView,
 };
 
-export default function Page() {
+function AppRouter() {
   const { currentView } = useAppStore();
 
   const ViewComponent = useMemo(
@@ -86,4 +86,18 @@ export default function Page() {
       <ViewComponent />
     </Suspense>
   );
+}
+
+export default function Page() {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return <AppLoader />;
+  }
+
+  return <AppRouter />;
 }
