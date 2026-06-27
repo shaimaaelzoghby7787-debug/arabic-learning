@@ -299,6 +299,12 @@ export default function Home() {
 
       {/* Sticky footer */}
       <footer className="mt-auto relative z-10 py-4 text-center">
+        <button
+          onClick={() => navigate('deploy')}
+          className="text-xs text-violet-500 hover:text-violet-700 underline cursor-pointer mb-2 transition-colors"
+        >
+          🚀 دليل نشر المنصة على الإنترنت
+        </button>
         <p className="text-xs text-muted-foreground">
           🌟 تعلّم العربية - الصف الأول الابتدائي 🌟
         </p>

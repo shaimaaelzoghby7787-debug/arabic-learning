@@ -59,6 +59,10 @@ const LeaderboardView = dynamic(() => import('@/components/arabic/LeaderboardVie
   ssr: false,
   loading: () => <AppLoader />,
 });
+const DeployGuide = dynamic(() => import('@/components/arabic/DeployGuide'), {
+  ssr: false,
+  loading: () => <AppLoader />,
+});
 
 const views: Record<string, React.ComponentType> = {
   home: Home,
@@ -71,6 +75,7 @@ const views: Record<string, React.ComponentType> = {
   teacher: TeacherDashboard,
   leaderboard: LeaderboardView,
   certificate: UnitsView,
+  deploy: DeployGuide,
 };
 
 function AppRouter() {
