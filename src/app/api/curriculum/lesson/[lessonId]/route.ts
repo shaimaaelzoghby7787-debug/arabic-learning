@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getLessonById, getQuestionsByLesson, getUnitById, UNITS } from "@/lib/curriculum-data";
 
 export async function GET(
   request: NextRequest,
@@ -8,14 +8,7 @@ export async function GET(
   try {
     const { lessonId } = await params;
 
-    const lesson = await db.lesson.findUnique({
-      where: { id: lessonId },
-      include: {
-        unit: {
-          select: { id: true, title: true, order: true },
-        },
-      },
-    });
+    const lesson = getLessonById(lessonId);
 
     if (!lesson) {
       return NextResponse.json(
@@ -24,25 +17,35 @@ export async function GET(
       );
     }
 
-    // Get question count for this lesson
-    const questionCount = await db.questionBank.count({
-      where: { lessonId: lesson.id },
-    });
+    const unit = getUnitById(lesson.unitId);
 
-    // Get unique question types
-    const typeAgg = await db.questionBank.groupBy({
-      by: ["type"],
-      where: { lessonId: lesson.id },
-      _count: { type: true },
-    });
-    const questionTypes = typeAgg.map((t) => ({
-      type: t.type,
-      count: t._count.type,
+    // Get question count and type breakdown
+    const lessonQuestions = getQuestionsByLesson(lessonId);
+    const questionCount = lessonQuestions.length;
+
+    const typeAgg = new Map<string, number>();
+    for (const q of lessonQuestions) {
+      typeAgg.set(q.type, (typeAgg.get(q.type) ?? 0) + 1);
+    }
+    const questionTypes = Array.from(typeAgg.entries()).map(([type, count]) => ({
+      type,
+      count,
     }));
 
     return NextResponse.json({
-      ...lesson,
-      words: safeParseJson(lesson.words, []),
+      id: lesson.id,
+      unitId: lesson.unitId,
+      order: lesson.order,
+      title: lesson.title,
+      letter: lesson.letter,
+      objectives: lesson.objectives,
+      content: lesson.content,
+      words: lesson.words,
+      tip: lesson.tip,
+      isIntro: lesson.isIntro,
+      introWords: lesson.introWords,
+      introMeanings: lesson.introMeanings,
+      unit: unit ? { id: unit.id, title: unit.title, order: unit.order } : null,
       questionCount,
       questionTypes,
     });
@@ -52,13 +55,5 @@ export async function GET(
       { error: "Failed to fetch lesson" },
       { status: 500 }
     );
-  }
-}
-
-function safeParseJson(str: string, fallback: unknown) {
-  try {
-    return JSON.parse(str);
-  } catch {
-    return fallback;
   }
 }

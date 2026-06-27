@@ -1,17 +1,48 @@
-import { db } from "@/lib/db";
+// ============================================================================
+// STATIC CURRICULUM DATA — All units, lessons, questions, achievements
+// Generated deterministically using a seeded PRNG (mulberry32)
+// ============================================================================
+
+// --- Seeded PRNG for deterministic question generation ---
+function mulberry32(seed: number) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const seededRandom = mulberry32(42);
+
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(seededRandom() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function pick<T>(arr: T[], n: number): T[] {
+  return shuffle(arr).slice(0, n);
+}
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
-interface UnitData {
+export interface Unit {
+  id: string;
   order: number;
   title: string;
   description: string;
-  lessons: LessonData[];
 }
 
-interface LessonData {
+export interface Lesson {
+  id: string;
+  unitId: string;
   order: number;
   title: string;
   letter: string;
@@ -24,7 +55,9 @@ interface LessonData {
   introMeanings?: Record<string, string>;
 }
 
-interface QuestionData {
+export interface Question {
+  id: string;
+  lessonId: string;
   type: string;
   question: string;
   options: string[];
@@ -33,25 +66,17 @@ interface QuestionData {
   hint: string;
 }
 
-// ============================================================================
-// HELPER: Shuffle and pick N items from array
-// ============================================================================
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-function pick<T>(arr: T[], n: number): T[] {
-  return shuffle(arr).slice(0, n);
+export interface Achievement {
+  id: string;
+  key: string;
+  title: string;
+  description: string;
+  icon: string;
+  xpReward: number;
 }
 
 // ============================================================================
-// QUESTION GENERATORS
+// QUESTION GENERATION HELPERS
 // ============================================================================
 
 const ALL_DISTRACTOR_LETTERS = [
@@ -77,10 +102,27 @@ function getDistractorLetters(letter: string, count: number): string[] {
   return pick(available, count);
 }
 
-// --- Generate letter-at-start questions ---
+function getLetterName(letter: string): string {
+  const names: Record<string, string> = {
+    "ب": "الباء", "م": "الميم", "ح": "الحاء", "ج": "الجيم", "د": "الدال",
+    "ل": "اللام", "ن": "النون", "ر": "الراء", "ق": "القاف", "ك": "الكاف",
+    "و": "الواو", "ه": "الهاء", "ذ": "الذال", "ظ": "الظاء",
+    "ط": "الطاء", "ص": "الصاد", "ض": "الضاد", "ث": "الثاء",
+  };
+  return names[letter] || letter;
+}
+
+interface QuestionData {
+  type: string;
+  question: string;
+  options: string[];
+  correctAnswer: string;
+  difficulty: number;
+  hint: string;
+}
+
 function genLetterAtStart(letter: string, words: string[], count: number): QuestionData[] {
   const questions: QuestionData[] = [];
-  const letterName = getLetterName(letter);
   for (const word of words) {
     if (questions.length >= count) break;
     const distractors = getDistractorLetters(letter, 3);
@@ -96,7 +138,6 @@ function genLetterAtStart(letter: string, words: string[], count: number): Quest
   return questions;
 }
 
-// --- Generate which-word-starts-with-letter questions ---
 function genWhichWordStartsWith(letter: string, words: string[], count: number): QuestionData[] {
   const questions: QuestionData[] = [];
   const letterName = getLetterName(letter);
@@ -116,13 +157,11 @@ function genWhichWordStartsWith(letter: string, words: string[], count: number):
   return questions;
 }
 
-// --- Generate complete-word questions ---
 function genCompleteWord(letter: string, words: string[], count: number): QuestionData[] {
   const questions: QuestionData[] = [];
   const letterName = getLetterName(letter);
   for (const word of words) {
     if (questions.length >= count) break;
-    const masked = letter + " " + "_ ".repeat(word.length - 2).trim() + " " + word[word.length - 1];
     const distractors = getDistractorWords(words, 3, [word]);
     questions.push({
       type: "complete_word",
@@ -136,7 +175,6 @@ function genCompleteWord(letter: string, words: string[], count: number): Questi
   return questions;
 }
 
-// --- Generate true/false questions about letter position ---
 function genTrueFalse(letter: string, words: string[], count: number): QuestionData[] {
   const questions: QuestionData[] = [];
   const letterName = getLetterName(letter);
@@ -170,7 +208,6 @@ function genTrueFalse(letter: string, words: string[], count: number): QuestionD
   return questions;
 }
 
-// --- Generate match-word-to-meaning questions ---
 function genMatchWordToMeaning(words: string[], meanings: Record<string, string>, count: number): QuestionData[] {
   const questions: QuestionData[] = [];
   for (const [word, meaning] of Object.entries(meanings)) {
@@ -189,7 +226,6 @@ function genMatchWordToMeaning(words: string[], meanings: Record<string, string>
   return questions;
 }
 
-// --- Generate choose-the-letter questions ---
 function genChooseLetter(letter: string, words: string[], count: number): QuestionData[] {
   const questions: QuestionData[] = [];
   const letterName = getLetterName(letter);
@@ -208,7 +244,6 @@ function genChooseLetter(letter: string, words: string[], count: number): Questi
   return questions;
 }
 
-// --- Generate which-word-contains-letter questions ---
 function genWhichWordContains(letter: string, words: string[], count: number): QuestionData[] {
   const questions: QuestionData[] = [];
   const letterName = getLetterName(letter);
@@ -228,16 +263,15 @@ function genWhichWordContains(letter: string, words: string[], count: number): Q
   return questions;
 }
 
-// --- Generate simple reading comprehension questions ---
 function genReadingComprehension(letter: string, words: string[], meanings: Record<string, string>, count: number): QuestionData[] {
   const questions: QuestionData[] = [];
   const letterName = getLetterName(letter);
   const sentences = [
-    { s: `أرى ${words[0]} في ${words[1]}`, q: `أين يوجد ${words[0]}؟`, a: words[1] },
-    { s: `أكلت ${words[2]} وكانت لذيذة`, q: `ماذا أكلت؟`, a: words[2] },
-    { s: `${words[3]} جميل جداً`, q: `ما الذي وُصف بأنه جميل؟`, a: words[3] },
+    { s: `أرى ${words[0]} في ${words[1]}`, q: `أين يوجد ${words[0]}؟`, a: words[0] },
+    { s: `أكلت ${words[2 % words.length]} وكانت لذيذة`, q: `ماذا أكلت؟`, a: words[2 % words.length] },
+    { s: `${words[3 % words.length]} جميل جداً`, q: `ما الذي وُصف بأنه جميل؟`, a: words[3 % words.length] },
     { s: `ذهبت إلى ${words[0]} مع ${words[1]}`, q: `إلى أين ذهبت؟`, a: words[0] },
-    { s: `لعب ${words[2]} مع ${words[3]} في الحديقة`, q: `من لعب في الحديقة؟`, a: words[2] },
+    { s: `لعب ${words[2 % words.length]} مع ${words[3 % words.length]} في الحديقة`, q: `من لعب في الحديقة؟`, a: words[2 % words.length] },
   ];
 
   for (const item of sentences) {
@@ -257,7 +291,6 @@ function genReadingComprehension(letter: string, words: string[], meanings: Reco
   return questions;
 }
 
-// --- Generate letter-position questions ---
 function genLetterPosition(letter: string, words: string[], count: number): QuestionData[] {
   const questions: QuestionData[] = [];
   const letterName = getLetterName(letter);
@@ -283,17 +316,16 @@ function genLetterPosition(letter: string, words: string[], count: number): Ques
   return questions;
 }
 
-// --- Generate "what letter does word start with" as choose_letter ---
 function genIdentifyLetterInWord(letter: string, words: string[], count: number): QuestionData[] {
   const questions: QuestionData[] = [];
   const letterName = getLetterName(letter);
   for (const word of words) {
     if (questions.length >= count) break;
-    const distractors = getDistractorLetters(letter, 3);
+    const distractors = getDistractorWords(words, 3, [word]);
     questions.push({
       type: "choose_letter",
       question: `حرف ${letterName} هو الحرف الأول في أي كلمة؟`,
-      options: shuffle([word, ...getDistractorWords(words, 3, [word])]),
+      options: shuffle([word, ...distractors]),
       correctAnswer: word,
       difficulty: 1,
       hint: `ابحث عن كلمة تبدأ بحرف ${letterName}`,
@@ -302,7 +334,6 @@ function genIdentifyLetterInWord(letter: string, words: string[], count: number)
   return questions;
 }
 
-// --- Generate "find the odd one out" questions ---
 function genOddOneOut(letter: string, words: string[], count: number): QuestionData[] {
   const questions: QuestionData[] = [];
   const letterName = getLetterName(letter);
@@ -323,66 +354,10 @@ function genOddOneOut(letter: string, words: string[], count: number): QuestionD
   return questions;
 }
 
-// ============================================================================
-// LETTER NAME MAP
-// ============================================================================
-
-function getLetterName(letter: string): string {
-  const names: Record<string, string> = {
-    "ب": "الباء", "م": "الميم", "ح": "الحاء", "ج": "الجيم", "د": "الدال",
-    "ل": "اللام", "ن": "النون", "ر": "الراء", "ق": "القاف", "ك": "الكاف",
-    "و": "الواو", "ه": "الهاء", "ذ": "الذال", "ظ": "الظاء",
-    "ط": "الطاء", "ص": "الصاد", "ض": "الضاد", "ث": "الثاء",
-  };
-  return names[letter] || letter;
-}
-
-// ============================================================================
-// COMBINED QUESTION GENERATOR FOR LETTER LESSONS (target: 100+)
-// ============================================================================
-
-function generateLetterQuestions(letter: string, words: string[], meanings: Record<string, string>): QuestionData[] {
-  const allQuestions: QuestionData[] = [
-    ...genLetterAtStart(letter, words, 8),
-    ...genWhichWordStartsWith(letter, words, 8),
-    ...genCompleteWord(letter, words, 8),
-    ...genTrueFalse(letter, words, 15),
-    ...genMatchWordToMeaning(words, meanings, 8),
-    ...genChooseLetter(letter, words, 8),
-    ...genWhichWordContains(letter, words, 8),
-    ...genReadingComprehension(letter, words, meanings, 5),
-    ...genLetterPosition(letter, words, 12),
-    ...genIdentifyLetterInWord(letter, words, 8),
-    ...genOddOneOut(letter, words, 5),
-    ...genExtraQuestions(letter, words, meanings, 12),
-  ];
-
-  // Ensure we have at least 100
-  if (allQuestions.length < 100) {
-    const extra = 100 - allQuestions.length;
-    for (let i = 0; i < extra; i++) {
-      const word = words[i % words.length];
-      const distractors = getDistractorLetters(letter, 3);
-      allQuestions.push({
-        type: "multiple_choice",
-        question: `ما الحرف الأول في كلمة "${word}"؟ (${i + 1})`,
-        options: shuffle([letter, ...distractors]),
-        correctAnswer: letter,
-        difficulty: 1,
-        hint: `انظر إلى أول حرف في الكلمة`,
-      });
-    }
-  }
-
-  return allQuestions.slice(0, 110);
-}
-
-// --- Extra variety questions ---
 function genExtraQuestions(letter: string, words: string[], meanings: Record<string, string>, count: number): QuestionData[] {
   const questions: QuestionData[] = [];
   const letterName = getLetterName(letter);
 
-  // "How many letters" questions
   for (const word of words) {
     if (questions.length >= count / 2) break;
     const correct = String(word.length);
@@ -398,7 +373,6 @@ function genExtraQuestions(letter: string, words: string[], meanings: Record<str
     });
   }
 
-  // "Which letter is in the middle" questions
   for (const word of words) {
     if (questions.length >= count) break;
     if (word.length < 3) continue;
@@ -418,14 +392,44 @@ function genExtraQuestions(letter: string, words: string[], meanings: Record<str
   return questions;
 }
 
-// ============================================================================
-// INTRO LESSON QUESTION GENERATOR (target: 50+)
-// ============================================================================
+function generateLetterQuestions(letter: string, words: string[], meanings: Record<string, string>): QuestionData[] {
+  const allQuestions: QuestionData[] = [
+    ...genLetterAtStart(letter, words, 8),
+    ...genWhichWordStartsWith(letter, words, 8),
+    ...genCompleteWord(letter, words, 8),
+    ...genTrueFalse(letter, words, 15),
+    ...genMatchWordToMeaning(words, meanings, 8),
+    ...genChooseLetter(letter, words, 8),
+    ...genWhichWordContains(letter, words, 8),
+    ...genReadingComprehension(letter, words, meanings, 5),
+    ...genLetterPosition(letter, words, 12),
+    ...genIdentifyLetterInWord(letter, words, 8),
+    ...genOddOneOut(letter, words, 5),
+    ...genExtraQuestions(letter, words, meanings, 12),
+  ];
+
+  if (allQuestions.length < 100) {
+    const extra = 100 - allQuestions.length;
+    for (let i = 0; i < extra; i++) {
+      const word = words[i % words.length];
+      const distractors = getDistractorLetters(letter, 3);
+      allQuestions.push({
+        type: "multiple_choice",
+        question: `ما الحرف الأول في كلمة "${word}"؟ (${i + 1})`,
+        options: shuffle([letter, ...distractors]),
+        correctAnswer: letter,
+        difficulty: 1,
+        hint: `انظر إلى أول حرف في الكلمة`,
+      });
+    }
+  }
+
+  return allQuestions.slice(0, 110);
+}
 
 function generateIntroQuestions(unitTitle: string, introWords: string[], introMeanings: Record<string, string>): QuestionData[] {
   const questions: QuestionData[] = [];
 
-  // Multiple choice: what does this word mean?
   for (const [word, meaning] of Object.entries(introMeanings)) {
     if (questions.length >= 15) break;
     const otherMeanings = Object.values(introMeanings).filter(m => m !== meaning);
@@ -440,7 +444,6 @@ function generateIntroQuestions(unitTitle: string, introWords: string[], introMe
     });
   }
 
-  // True/False about topic words
   for (const [word, meaning] of Object.entries(introMeanings)) {
     if (questions.length >= 30) break;
     questions.push({
@@ -453,7 +456,6 @@ function generateIntroQuestions(unitTitle: string, introWords: string[], introMe
     });
   }
 
-  // Match word to meaning
   for (const [word, meaning] of Object.entries(introMeanings)) {
     if (questions.length >= 40) break;
     const otherWords = Object.keys(introMeanings).filter(w => w !== word);
@@ -468,7 +470,6 @@ function generateIntroQuestions(unitTitle: string, introWords: string[], introMe
     });
   }
 
-  // Choose letter for intro words
   for (const word of introWords) {
     if (questions.length >= 50) break;
     const firstLetter = word[0];
@@ -483,7 +484,6 @@ function generateIntroQuestions(unitTitle: string, introWords: string[], introMe
     });
   }
 
-  // Ensure at least 50
   if (questions.length < 50) {
     const extra = 50 - questions.length;
     for (let i = 0; i < extra; i++) {
@@ -502,323 +502,6 @@ function generateIntroQuestions(unitTitle: string, introWords: string[], introMe
 
   return questions.slice(0, 55);
 }
-
-// ============================================================================
-// ALL DATA: UNITS, LESSONS, WORDS, MEANINGS
-// ============================================================================
-
-const UNITS: UnitData[] = [
-  // ===== UNIT 1: أسرتي =====
-  {
-    order: 1,
-    title: "أسرتي",
-    description: "في هذا الوحدة سنتعلم عن الأسره والحروف ب م ح ج د",
-    lessons: [
-      // --- Intro ---
-      {
-        order: 0,
-        title: "تمهيد: أسرتي",
-        letter: "",
-        objectives: "التعرف على مفهوم الأسرة وأهمية العائلة في حياتنا",
-        content: "الأسرة هي مجموعة من الأشخاص يعيشون معاً و يحبون بعضهم البعض. الأسرة تتكون من أب وأم وأطفال. نحن نحب أسرتنا ونحترمها. في هذا الوحدة سنتعلم حروفاً جديدة تساعدنا على قراءة كلمات عن أسرتنا.",
-        words: ["أب", "أم", "بيت", "عائلة", "أخ", "أخت"],
-        tip: "الأسرة هي أغلى ما نملك، تعلّم كلمات عن أسرتك!",
-        isIntro: true,
-        introWords: ["أب", "أم", "بيت", "عائلة", "أخ", "أخت"],
-        introMeanings: {
-          "أب": "والد الطفل",
-          "أم": "والدة الطفل",
-          "بيت": "المكان الذي نعيش فيه",
-          "عائلة": "مجموعة الأقارب",
-          "أخ": "ابن الأم والأب (ذكر)",
-          "أخت": "ابنة الأم والأب (أنثى)",
-        },
-      },
-      // --- ب ---
-      {
-        order: 1,
-        title: "حرف الباء",
-        letter: "ب",
-        objectives: "التعرف على حرف الباء وأصواته وقراءة وكتابة كلمات تحتوي على حرف الباء",
-        content: "حرف الباء هو الحرف الثاني في اللغة العربية. يُنطق باء. نجد حرف الباء في بداية كلمات كثيرة مثل: باب، بيت، بطة. تدرّب على كتابة حرف الباء وقراءة الكلمات التي تبدأ به.",
-        words: ["باب", "بيت", "بطة", "بقرة", "أب", "أبي", "برتقال", "بسمة"],
-        tip: "حرف الباء يُكتب من أسفل إلى أعلى. تدرّب على كتابته!",
-        isIntro: false,
-      },
-      // --- م ---
-      {
-        order: 2,
-        title: "حرف الميم",
-        letter: "م",
-        objectives: "التعرف على حرف الميم وأصواته وقراءة وكتابة كلمات تحتوي على حرف الميم",
-        content: "حرف الميم هو حرف مهم في اللغة العربية. يُنطق ميماً. نجد حرف الميم في كلمات مثل: ماء، مدرسة، أمّي. تعلّم كيف تكتب حرف الميم وتقرأ الكلمات التي تحتوي عليه.",
-        words: ["ماء", "مدرسة", "أم", "أمي", "ممتاز", "منزل", "موزة", "مسطرة"],
-        tip: "حرف الميم له ثلاثة أشكال حسب موقعه في الكلمة",
-        isIntro: false,
-      },
-      // --- ح ---
-      {
-        order: 3,
-        title: "حرف الحاء",
-        letter: "ح",
-        objectives: "التعرف على حرف الحاء وأصواته وقراءة وكتابة كلمات تحتوي على حرف الحاء",
-        content: "حرف الحاء حرف رقيق يُنطق من الحلق. نجد حرف الحاء في كلمات مثل: حديقة، حصان، حوت. تعلّم كيف تميّز حرف الحاء وتقرأ الكلمات التي تحتوي عليه.",
-        words: ["حديقة", "حصان", "حوت", "حليب", "أحمد", "حجرة", "حقيبة", "حرف"],
-        tip: "حرف الحاء يُنطق من أعمق الحلق. مارس نطقه!",
-        isIntro: false,
-      },
-      // --- ج ---
-      {
-        order: 4,
-        title: "حرف الجيم",
-        letter: "ج",
-        objectives: "التعرف على حرف الجيم وأصواته وقراءة وكتابة كلمات تحتوي على حرف الجيم",
-        content: "حرف الجيم حرف جميل يُنطق جيماً. نجد حرف الجيم في كلمات مثل: جمل، جار، جدار. تعلّم كيف تكتب حرف الجيم وتقرأ الكلمات التي تبدأ به.",
-        words: ["جمل", "جار", "جدار", "جدي", "جزيرة", "جمال", "جنيه", "جداول"],
-        tip: "حرف الجيم يُكتب برأس صغير في الأعلى. انتبه لشكله!",
-        isIntro: false,
-      },
-      // --- د ---
-      {
-        order: 5,
-        title: "حرف الدال",
-        letter: "د",
-        objectives: "التعرف على حرف الدال وأصواته وقراءة وكتابة كلمات تحتوي على حرف الدال",
-        content: "حرف الدال حرف مهم يُنطق دالاً. نجد حرف الدال في كلمات مثل: دب، دجاجة، دراجة. تعلّم كيف تكتب حرف الدال وتقرأ الكلمات التي تحتوي عليه.",
-        words: ["دب", "دجاجة", "دراجة", "دادا", "دمية", "دلو", "دكان", "ديك"],
-        tip: "حرف الدال يشبه حرف الراء لكن له بطن مختلف. فرّق بينهما!",
-        isIntro: false,
-      },
-    ],
-  },
-  // ===== UNIT 2: حيواناتي =====
-  {
-    order: 2,
-    title: "حيواناتي",
-    description: "في هذا الوحدة سنتعلم عن الحيوانات والحروف ل ن ر ق ك",
-    lessons: [
-      // --- Intro ---
-      {
-        order: 0,
-        title: "تمهيد: حيواناتي",
-        letter: "",
-        objectives: "التعرف على الحيوانات المختلفة وأسمائها باللغة العربية",
-        content: "الله خلق لنا الكثير من الحيوانات الجميلة. هناك حيوانات تعيش في المزرعة مثل البقرة والديك. وهناك حيوانات تعيش في الغابة مثل الأسد والنمر. تعلّم أسماء الحيوانات باللغة العربية!",
-        words: ["قطة", "كلب", "حصان", "بقرة", "ديك", "أرنب"],
-        tip: "الحيوانات كائنات جميلة، تعلّم أسماءها بالعربية!",
-        isIntro: true,
-        introWords: ["قطة", "كلب", "حصان", "بقرة", "ديك", "أرنب"],
-        introMeanings: {
-          "قطة": "حيوان صغير ينمو",
-          "كلب": "حيوان أليف يحرس المنزل",
-          "حصان": "حيوان كبير يركبه الإنسان",
-          "بقرة": "حيوان يعطينا الحليب",
-          "ديك": "ذكر الدجاجة يصيح صباحاً",
-          "أرنب": "حيوان صغير له أذنان طويلتان",
-        },
-      },
-      // --- ل ---
-      {
-        order: 1,
-        title: "حرف اللام",
-        letter: "ل",
-        objectives: "التعرف على حرف اللام وأصواته وقراءة وكتابة كلمات تحتوي على حرف اللام",
-        content: "حرف اللام حرف مهم جداً في اللغة العربية. يُنطق لاماً. نجد حرف اللام في كلمات مثل: لعب، ليمون، كلب. تعلّم كيف تكتب حرف اللام وتقرأ الكلمات التي تحتوي عليه.",
-        words: ["لعب", "ليمون", "كلب", "لؤلؤ", "لحم", "ليل", "لطيف", "لسان"],
-        tip: "حرف اللام يُكتب بشكل مستقيم. مارس كتابته!",
-        isIntro: false,
-      },
-      // --- ن ---
-      {
-        order: 2,
-        title: "حرف النون",
-        letter: "ن",
-        objectives: "التعرف على حرف النون وأصواته وقراءة وكتابة كلمات تحتوي على حرف النون",
-        content: "حرف النون حرف جميل يُنطق نوناً. نجد حرف النون في كلمات مثل: نار، نحلة، نجم. تعلّم كيف تميّز حرف النون وتقرأ الكلمات التي تحتوي عليه.",
-        words: ["نار", "نحلة", "نجم", "أنا", "نمر", "نافذة", "نشيط", "نعامة"],
-        tip: "حرف النون له نقطة في المنتصف. تعرّف على شكله!",
-        isIntro: false,
-      },
-      // --- ر ---
-      {
-        order: 3,
-        title: "حرف الراء",
-        letter: "ر",
-        objectives: "التعرف على حرف الراء وأصواته وقراءة وكتابة كلمات تحتوي على حرف الراء",
-        content: "حرف الراء حرف مميز يُنطق راءً. نجد حرف الراء في كلمات مثل: ربيع، رسم، رجل. تعلّم كيف تكتب حرف الراء وتقرأ الكلمات التي تبدأ به.",
-        words: ["ربيع", "رسم", "رجل", "قرية", "رمان", "روزم", "رمل", "روز"],
-        tip: "حرف الراء يُكتب برأس صغير. انتبه لشكله!",
-        isIntro: false,
-      },
-      // --- ق ---
-      {
-        order: 4,
-        title: "حرف القاف",
-        letter: "ق",
-        objectives: "التعرف على حرف القاف وأصواته وقراءة وكتابة كلمات تحتوي على حرف القاف",
-        content: "حرف القاف حرف قوي يُنطق قافاً. نجد حرف القاف في كلمات مثل: قمر، قلم، قط. تعلّم كيف تكتب حرف القاف وتقرأ الكلمات التي تحتوي عليه.",
-        words: ["قمر", "قلم", "قط", "قرد", "قصر", "قرآن", "قهوة", "قطار"],
-        tip: "حرف القاف له نقطتان فوقه. لا تخلطه بحرف الفاء!",
-        isIntro: false,
-      },
-      // --- ك ---
-      {
-        order: 5,
-        title: "حرف الكاف",
-        letter: "ك",
-        objectives: "التعرف على حرف الكاف وأصواته وقراءة وكتابة كلمات تحتوي على حرف الكاف",
-        content: "حرف الكاف حرف مهم يُنطق كافاً. نجد حرف الكاف في كلمات مثل: كتاب، كرة، كلب. تعلّم كيف تكتب حرف الكاف وتقرأ الكلمات التي تحتوي عليه.",
-        words: ["كتاب", "كرة", "كلب", "كرسي", "كنز", "كنغر", "كوب", "كعك"],
-        tip: "حرف الكاف يشبه حرف الباء لكن بدون نقطة. فرّق بينهما!",
-        isIntro: false,
-      },
-    ],
-  },
-  // ===== UNIT 3: أجزاء جسمي =====
-  {
-    order: 3,
-    title: "أجزاء جسمي",
-    description: "في هذا الوحدة سنتعلم عن أجزاء الجسم والحروف و ه ذ ظ",
-    lessons: [
-      // --- Intro ---
-      {
-        order: 0,
-        title: "تمهيد: أجزاء جسمي",
-        letter: "",
-        objectives: "التعرف على أجزاء الجسم المختلفة وأسمائها باللغة العربية",
-        content: "جسم الإنسان مكون من أجزاء كثيرة مهمة. الرأس فيه العينان والأذنان والأنف والفم. والجسم فيه اليدان والقدمان. تعلّم أسماء أجزاء جسمك باللغة العربية!",
-        words: ["رأس", "عين", "أذن", "أنف", "فم", "يد"],
-        tip: "تعرّف على أجزاء جسمك وتعلّم أسماءها بالعربية!",
-        isIntro: true,
-        introWords: ["رأس", "عين", "أذن", "أنف", "فم", "يد"],
-        introMeanings: {
-          "رأس": "أعلى جزء في جسم الإنسان",
-          "عين": "عضو الإبصار الذي نرى به",
-          "أذن": "عضو السمع الذي نسمع به",
-          "أنف": "عضو الشم الذي نتنفس به",
-          "فم": "عضو الكلام والأكل",
-          "يد": "عضو الإمساك الذي نكتب ونعمل به",
-        },
-      },
-      // --- و ---
-      {
-        order: 1,
-        title: "حرف الواو",
-        letter: "و",
-        objectives: "التعرف على حرف الواو وأصواته وقراءة وكتابة كلمات تحتوي على حرف الواو",
-        content: "حرف الواو حرف مهم يُنطق واواً. نجد حرف الواو في كلمات مثل: ورد، وجه، ولد. تعلّم كيف تكتب حرف الواو وتقرأ الكلمات التي تحتوي عليه.",
-        words: ["ورد", "وجه", "ولد", "ورقة", "وردة", "وطن", "وسادة", "وصف"],
-        tip: "حرف الواو يُكتب مثل حرفين صغيرين متصلين. تعرّف على شكله!",
-        isIntro: false,
-      },
-      // --- ه ---
-      {
-        order: 2,
-        title: "حرف الهاء",
-        letter: "ه",
-        objectives: "التعرف على حرف الهاء وأصواته وقراءة وكتابة كلمات تحتوي على حرف الهاء",
-        content: "حرف الهاء حرف مهم يُنطق هاً. نجد حرف الهاء في كلمات مثل: هلال، هدية، هرّة. تعلّم كيف تميّز حرف الهاء وتقرأ الكلمات التي تحتوي عليه.",
-        words: ["هلال", "هدية", "هرّة", "هدوء", "هامش", "هرم", "هاتف", "هرة"],
-        tip: "حرف الهاء يُنطق من الحلق. مارس نطقه!",
-        isIntro: false,
-      },
-      // --- ذ ---
-      {
-        order: 3,
-        title: "حرف الذال",
-        letter: "ذ",
-        objectives: "التعرف على حرف الذال وأصواته وقراءة وكتابة كلمات تحتوي على حرف الذال",
-        content: "حرف الذال حرف جميل يُنطق ذالاً. نجد حرف الذال في كلمات مثل: ذئب، ذهب، ذراع. تعلّم كيف تكتب حرف الذال وتقرأ الكلمات التي تحتوي عليه.",
-        words: ["ذئب", "ذهب", "ذراع", "ذرة", "ذكية", "ذكر", "ذوق", "ذباب"],
-        tip: "حرف الذال يشبه حرف الدال لكن له نقطة أعلاه. فرّق بينهما!",
-        isIntro: false,
-      },
-      // --- ظ ---
-      {
-        order: 4,
-        title: "حرف الظاء",
-        letter: "ظ",
-        objectives: "التعرف على حرف الظاء وأصواته وقراءة وكتابة كلمات تحتوي على حرف الظاء",
-        content: "حرف الظاء حرف مميز يُنطق ظاءً. نجد حرف الظاء في كلمات مثل: ظرف، ظل، ظاهر. تعلّم كيف تكتب حرف الظاء وتقرأ الكلمات التي تحتوي عليه.",
-        words: ["ظرف", "ظل", "ظاهر", "ظريف", "نظر", "ظهر", "وظيفة", "ظلمة"],
-        tip: "حرف الظاء يشبه حرف الطاء لكن له نقطة أعلاه. فرّق بينهما!",
-        isIntro: false,
-      },
-    ],
-  },
-  // ===== UNIT 4: مدرستي =====
-  {
-    order: 4,
-    title: "مدرستي",
-    description: "في هذا الوحدة سنتعلم عن المدرسة والحروف ط ص ض ث",
-    lessons: [
-      // --- Intro ---
-      {
-        order: 0,
-        title: "تمهيد: مدرستي",
-        letter: "",
-        objectives: "التعرف على بيئة المدرسة وأدوات الدراسة وأسمائها باللغة العربية",
-        content: "المدرسة مكان جميل نتعلم فيه. في المدرسة نجد فصولاً ومعلمين وزملاء. نستخدم أدوات مثل القلم والكتاب والمسطرة. المدرسة تساعدنا على التعلم والنمو. تعلّم كلمات عن مدرستك!",
-        words: ["مدرسة", "فصل", "معلم", "كتاب", "قلم", "مكتب"],
-        tip: "المدرسة مكان رائع للتعلم، تعلّم كلمات عنها!",
-        isIntro: true,
-        introWords: ["مدرسة", "فصل", "معلم", "كتاب", "قلم", "مكتب"],
-        introMeanings: {
-          "مدرسة": "مكان نتعلم فيه",
-          "فصل": "الغرفة التي ندرس فيها",
-          "معلم": "الشخص الذي يعلّمنا",
-          "كتاب": "موضوع نقرأ منه",
-          "قلم": "أداة نكتب بها",
-          "مكتب": "مكان نجلس عليه للدراسة",
-        },
-      },
-      // --- ط ---
-      {
-        order: 1,
-        title: "حرف الطاء",
-        letter: "ط",
-        objectives: "التعرف على حرف الطاء وأصواته وقراءة وكتابة كلمات تحتوي على حرف الطاء",
-        content: "حرف الطاء حرف قوي يُنطق طاءً. نجد حرف الطاء في كلمات مثل: طائر، طاولة، طالب. تعلّم كيف تكتب حرف الطاء وتقرأ الكلمات التي تحتوي عليه.",
-        words: ["طائر", "طاولة", "طالب", "طريق", "طباشير", "طابور", "طفل", "طيران"],
-        tip: "حرف الطاء له رأس دائري وذيل طويل. تعرّف على شكله!",
-        isIntro: false,
-      },
-      // --- ص ---
-      {
-        order: 2,
-        title: "حرف الصاد",
-        letter: "ص",
-        objectives: "التعرف على حرف الصاد وأصواته وقراءة وكتابة كلمات تحتوي على حرف الصاد",
-        content: "حرف الصاد حرف مميز يُنطق صاداً. نجد حرف الصاد في كلمات مثل: صقر، صباح، صندوق. تعلّم كيف تميّز حرف الصاد وتقرأ الكلمات التي تحتوي عليه.",
-        words: ["صقر", "صباح", "صندوق", "صديق", "صفر", "صف", "صومعة", "صوت"],
-        tip: "حرف الصاد يُنطق من الحلق. فرّق بينه وبين حرف السين!",
-        isIntro: false,
-      },
-      // --- ض ---
-      {
-        order: 3,
-        title: "حرف الضاد",
-        letter: "ض",
-        objectives: "التعرف على حرف الضاد وأصواته وقراءة وكتابة كلمات تحتوي على حرف الضاد",
-        content: "حرف الضاد هو حرف فريد في اللغة العربية لا يوجد في معظم اللغات الأخرى. يُنطق ضاداً. نجد حرف الضاد في كلمات مثل: ضفدع، ضوء، ضحك. تعلّم كيف تكتب حرف الضاد وتقرأ الكلمات التي تحتوي عليه.",
-        words: ["ضفدع", "ضوء", "ضحك", "ضربة", "ضخم", "ضغط", "ضعف", "ضجيج"],
-        tip: "حرف الضاد حرف عربي فريد. مارس نطقه كثيراً!",
-        isIntro: false,
-      },
-      // --- ث ---
-      {
-        order: 4,
-        title: "حرف الثاء",
-        letter: "ث",
-        objectives: "التعرف على حرف الثاء وأصواته وقراءة وكتابة كلمات تحتوي على حرف الثاء",
-        content: "حرف الثاء حرف جميل يُنطق ثاءً. نجد حرف الثاء في كلمات مثل: ثعلب، ثلج، ثوب. تعلّم كيف تكتب حرف الثاء وتقرأ الكلمات التي تحتوي عليه.",
-        words: ["ثعلب", "ثلج", "ثوب", "ثريا", "ثابت", "ثقيل", "ثمن", "ثمار"],
-        tip: "حرف الثاء يشبه حرف التاء لكن له ثلاث نقاط. فرّق بينهما!",
-        isIntro: false,
-      },
-    ],
-  },
-];
 
 // ============================================================================
 // WORD MEANINGS FOR LETTER LESSONS
@@ -934,156 +617,425 @@ const LETTER_MEANINGS: Record<string, Record<string, string>> = {
 };
 
 // ============================================================================
-// ACHIEVEMENTS DATA
+// UNIT & LESSON DEFINITIONS
 // ============================================================================
 
-const ACHIEVEMENTS = [
-  { key: "first_letter", title: "أول حرف", description: "تعلم أول حرف عربي", icon: "🔤", xpReward: 10 },
-  { key: "first_word", title: "أول كلمة", description: "تعلم أول كلمة عربية", icon: "📖", xpReward: 15 },
-  { key: "first_lesson", title: "أول درس", description: "أكمل أول درس بنجاح", icon: "✅", xpReward: 20 },
-  { key: "first_unit", title: "أول وحدة", description: "أكمل أول وحدة بالكامل", icon: "🏆", xpReward: 50 },
-  { key: "first_100_xp", title: "أول 100 نقطة", description: "اجمع 100 نقطة خبرة", icon: "💯", xpReward: 0 },
-  { key: "unit1_complete", title: "إكمال الوحدة الأولى", description: "أكمل وحدة أسرتي بالكامل", icon: "👨‍👩‍👧‍👦", xpReward: 50 },
-  { key: "unit2_complete", title: "إكمال الوحدة الثانية", description: "أكمل وحدة حيواناتي بالكامل", icon: "🦁", xpReward: 50 },
-  { key: "unit3_complete", title: "إكمال الوحدة الثالثة", description: "أكمل وحدة أجزاء جسمي بالكامل", icon: "🧍", xpReward: 50 },
-  { key: "unit4_complete", title: "إكمال الوحدة الرابعة", description: "أكمل وحدة مدرستي بالكامل", icon: "🏫", xpReward: 50 },
-  { key: "all_units_complete", title: "إكمال المنهج", description: "أكمل جميع وحدات المنهج", icon: "🎓", xpReward: 200 },
-  { key: "grade1_star", title: "نجم الصف الأول", description: "حصل على نجوم في كل الدروس", icon: "⭐", xpReward: 100 },
-  { key: "quiz_hero", title: "بطل الاختبار", description: "حصل على درجة كاملة في اختبار", icon: "🥇", xpReward: 30 },
+interface UnitDef {
+  order: number;
+  title: string;
+  description: string;
+  lessons: LessonDef[];
+}
+
+interface LessonDef {
+  order: number;
+  title: string;
+  letter: string;
+  objectives: string;
+  content: string;
+  words: string[];
+  tip: string;
+  isIntro: boolean;
+  introWords?: string[];
+  introMeanings?: Record<string, string>;
+}
+
+const UNIT_DEFS: UnitDef[] = [
+  {
+    order: 1,
+    title: "أسرتي",
+    description: "في هذا الوحدة سنتعلم عن الأسره والحروف ب م ح ج د",
+    lessons: [
+      {
+        order: 0, title: "تمهيد: أسرتي", letter: "",
+        objectives: "التعرف على مفهوم الأسرة وأهمية العائلة في حياتنا",
+        content: "الأسرة هي مجموعة من الأشخاص يعيشون معاً و يحبون بعضهم البعض. الأسرة تتكون من أب وأم وأطفال. نحن نحب أسرتنا ونحترمها. في هذا الوحدة سنتعلم حروفاً جديدة تساعدنا على قراءة كلمات عن أسرتنا.",
+        words: ["أب", "أم", "بيت", "عائلة", "أخ", "أخت"],
+        tip: "الأسرة هي أغلى ما نملك، تعلّم كلمات عن أسرتك!",
+        isIntro: true,
+        introWords: ["أب", "أم", "بيت", "عائلة", "أخ", "أخت"],
+        introMeanings: {
+          "أب": "والد الطفل", "أم": "والدة الطفل",
+          "بيت": "المكان الذي نعيش فيه", "عائلة": "مجموعة الأقارب",
+          "أخ": "ابن الأم والأب (ذكر)", "أخت": "ابنة الأم والأب (أنثى)",
+        },
+      },
+      {
+        order: 1, title: "حرف الباء", letter: "ب",
+        objectives: "التعرف على حرف الباء وأصواته وقراءة وكتابة كلمات تحتوي على حرف الباء",
+        content: "حرف الباء هو الحرف الثاني في اللغة العربية. يُنطق باء. نجد حرف الباء في بداية كلمات كثيرة مثل: باب، بيت، بطة. تدرّب على كتابة حرف الباء وقراءة الكلمات التي تبدأ به.",
+        words: ["باب", "بيت", "بطة", "بقرة", "أب", "أبي", "برتقال", "بسمة"],
+        tip: "حرف الباء يُكتب من أسفل إلى أعلى. تدرّب على كتابته!",
+        isIntro: false,
+      },
+      {
+        order: 2, title: "حرف الميم", letter: "م",
+        objectives: "التعرف على حرف الميم وأصواته وقراءة وكتابة كلمات تحتوي على حرف الميم",
+        content: "حرف الميم هو حرف مهم في اللغة العربية. يُنطق ميماً. نجد حرف الميم في كلمات مثل: ماء، مدرسة، أمّي. تعلّم كيف تكتب حرف الميم وتقرأ الكلمات التي تحتوي عليه.",
+        words: ["ماء", "مدرسة", "أم", "أمي", "ممتاز", "منزل", "موزة", "مسطرة"],
+        tip: "حرف الميم له ثلاثة أشكال حسب موقعه في الكلمة",
+        isIntro: false,
+      },
+      {
+        order: 3, title: "حرف الحاء", letter: "ح",
+        objectives: "التعرف على حرف الحاء وأصواته وقراءة وكتابة كلمات تحتوي على حرف الحاء",
+        content: "حرف الحاء حرف رقيق يُنطق من الحلق. نجد حرف الحاء في كلمات مثل: حديقة، حصان، حوت. تعلّم كيف تميّز حرف الحاء وتقرأ الكلمات التي تحتوي عليه.",
+        words: ["حديقة", "حصان", "حوت", "حليب", "أحمد", "حجرة", "حقيبة", "حرف"],
+        tip: "حرف الحاء يُنطق من أعمق الحلق. مارس نطقه!",
+        isIntro: false,
+      },
+      {
+        order: 4, title: "حرف الجيم", letter: "ج",
+        objectives: "التعرف على حرف الجيم وأصواته وقراءة وكتابة كلمات تحتوي على حرف الجيم",
+        content: "حرف الجيم حرف جميل يُنطق جيماً. نجد حرف الجيم في كلمات مثل: جمل، جار، جدار. تعلّم كيف تكتب حرف الجيم وتقرأ الكلمات التي تبدأ به.",
+        words: ["جمل", "جار", "جدار", "جدي", "جزيرة", "جمال", "جنيه", "جداول"],
+        tip: "حرف الجيم يُكتب برأس صغير في الأعلى. انتبه لشكله!",
+        isIntro: false,
+      },
+      {
+        order: 5, title: "حرف الدال", letter: "د",
+        objectives: "التعرف على حرف الدال وأصواته وقراءة وكتابة كلمات تحتوي على حرف الدال",
+        content: "حرف الدال حرف مهم يُنطق دالاً. نجد حرف الدال في كلمات مثل: دب، دجاجة، دراجة. تعلّم كيف تكتب حرف الدال وتقرأ الكلمات التي تحتوي عليه.",
+        words: ["دب", "دجاجة", "دراجة", "دادا", "دمية", "دلو", "دكان", "ديك"],
+        tip: "حرف الدال يشبه حرف الراء لكن له بطن مختلف. فرّق بينهما!",
+        isIntro: false,
+      },
+    ],
+  },
+  {
+    order: 2,
+    title: "حيواناتي",
+    description: "في هذا الوحدة سنتعلم عن الحيوانات والحروف ل ن ر ق ك",
+    lessons: [
+      {
+        order: 0, title: "تمهيد: حيواناتي", letter: "",
+        objectives: "التعرف على الحيوانات المختلفة وأسمائها باللغة العربية",
+        content: "الله خلق لنا الكثير من الحيوانات الجميلة. هناك حيوانات تعيش في المزرعة مثل البقرة والديك. وهناك حيوانات تعيش في الغابة مثل الأسد والنمر. تعلّم أسماء الحيوانات باللغة العربية!",
+        words: ["قطة", "كلب", "حصان", "بقرة", "ديك", "أرنب"],
+        tip: "الحيوانات كائنات جميلة، تعلّم أسماءها بالعربية!",
+        isIntro: true,
+        introWords: ["قطة", "كلب", "حصان", "بقرة", "ديك", "أرنب"],
+        introMeanings: {
+          "قطة": "حيوان صغير ينمو", "كلب": "حيوان أليف يحرس المنزل",
+          "حصان": "حيوان كبير يركبه الإنسان", "بقرة": "حيوان يعطينا الحليب",
+          "ديك": "ذكر الدجاجة يصيح صباحاً", "أرنب": "حيوان صغير له أذنان طويلتان",
+        },
+      },
+      {
+        order: 1, title: "حرف اللام", letter: "ل",
+        objectives: "التعرف على حرف اللام وأصواته وقراءة وكتابة كلمات تحتوي على حرف اللام",
+        content: "حرف اللام حرف مهم جداً في اللغة العربية. يُنطق لاماً. نجد حرف اللام في كلمات مثل: لعب، ليمون، كلب. تعلّم كيف تكتب حرف اللام وتقرأ الكلمات التي تحتوي عليه.",
+        words: ["لعب", "ليمون", "كلب", "لؤلؤ", "لحم", "ليل", "لطيف", "لسان"],
+        tip: "حرف اللام يُكتب بشكل مستقيم. مارس كتابته!",
+        isIntro: false,
+      },
+      {
+        order: 2, title: "حرف النون", letter: "ن",
+        objectives: "التعرف على حرف النون وأصواته وقراءة وكتابة كلمات تحتوي على حرف النون",
+        content: "حرف النون حرف جميل يُنطق نوناً. نجد حرف النون في كلمات مثل: نار، نحلة، نجم. تعلّم كيف تميّز حرف النون وتقرأ الكلمات التي تحتوي عليه.",
+        words: ["نار", "نحلة", "نجم", "أنا", "نمر", "نافذة", "نشيط", "نعامة"],
+        tip: "حرف النون له نقطة في المنتصف. تعرّف على شكله!",
+        isIntro: false,
+      },
+      {
+        order: 3, title: "حرف الراء", letter: "ر",
+        objectives: "التعرف على حرف الراء وأصواته وقراءة وكتابة كلمات تحتوي على حرف الراء",
+        content: "حرف الراء حرف مميز يُنطق راءً. نجد حرف الراء في كلمات مثل: ربيع، رسم، رجل. تعلّم كيف تكتب حرف الراء وتقرأ الكلمات التي تبدأ به.",
+        words: ["ربيع", "رسم", "رجل", "قرية", "رمان", "روزم", "رمل", "روز"],
+        tip: "حرف الراء يُكتب برأس صغير. انتبه لشكله!",
+        isIntro: false,
+      },
+      {
+        order: 4, title: "حرف القاف", letter: "ق",
+        objectives: "التعرف على حرف القاف وأصواته وقراءة وكتابة كلمات تحتوي على حرف القاف",
+        content: "حرف القاف حرف قوي يُنطق قافاً. نجد حرف القاف في كلمات مثل: قمر، قلم، قط. تعلّم كيف تكتب حرف القاف وتقرأ الكلمات التي تحتوي عليه.",
+        words: ["قمر", "قلم", "قط", "قرد", "قصر", "قرآن", "قهوة", "قطار"],
+        tip: "حرف القاف له نقطتان فوقه. لا تخلطه بحرف الفاء!",
+        isIntro: false,
+      },
+      {
+        order: 5, title: "حرف الكاف", letter: "ك",
+        objectives: "التعرف على حرف الكاف وأصواته وقراءة وكتابة كلمات تحتوي على حرف الكاف",
+        content: "حرف الكاف حرف مهم يُنطق كافاً. نجد حرف الكاف في كلمات مثل: كتاب، كرة، كلب. تعلّم كيف تكتب حرف الكاف وتقرأ الكلمات التي تحتوي عليه.",
+        words: ["كتاب", "كرة", "كلب", "كرسي", "كنز", "كنغر", "كوب", "كعك"],
+        tip: "حرف الكاف يشبه حرف الباء لكن بدون نقطة. فرّق بينهما!",
+        isIntro: false,
+      },
+    ],
+  },
+  {
+    order: 3,
+    title: "أجزاء جسمي",
+    description: "في هذا الوحدة سنتعلم عن أجزاء الجسم والحروف و ه ذ ظ",
+    lessons: [
+      {
+        order: 0, title: "تمهيد: أجزاء جسمي", letter: "",
+        objectives: "التعرف على أجزاء الجسم المختلفة وأسمائها باللغة العربية",
+        content: "جسم الإنسان مكون من أجزاء كثيرة مهمة. الرأس فيه العينان والأذنان والأنف والفم. والجسم فيه اليدان والقدمان. تعلّم أسماء أجزاء جسمك باللغة العربية!",
+        words: ["رأس", "عين", "أذن", "أنف", "فم", "يد"],
+        tip: "تعرّف على أجزاء جسمك وتعلّم أسماءها بالعربية!",
+        isIntro: true,
+        introWords: ["رأس", "عين", "أذن", "أنف", "فم", "يد"],
+        introMeanings: {
+          "رأس": "أعلى جزء في جسم الإنسان", "عين": "عضو الإبصار الذي نرى به",
+          "أذن": "عضو السمع الذي نسمع به", "أنف": "عضو الشم الذي نتنفس به",
+          "فم": "عضو الكلام والأكل", "يد": "عضو الإمساك الذي نكتب ونعمل به",
+        },
+      },
+      {
+        order: 1, title: "حرف الواو", letter: "و",
+        objectives: "التعرف على حرف الواو وأصواته وقراءة وكتابة كلمات تحتوي على حرف الواو",
+        content: "حرف الواو حرف مهم يُنطق واواً. نجد حرف الواو في كلمات مثل: ورد، وجه، ولد. تعلّم كيف تكتب حرف الواو وتقرأ الكلمات التي تحتوي عليه.",
+        words: ["ورد", "وجه", "ولد", "ورقة", "وردة", "وطن", "وسادة", "وصف"],
+        tip: "حرف الواو يُكتب مثل حرفين صغيرين متصلين. تعرّف على شكله!",
+        isIntro: false,
+      },
+      {
+        order: 2, title: "حرف الهاء", letter: "ه",
+        objectives: "التعرف على حرف الهاء وأصواته وقراءة وكتابة كلمات تحتوي على حرف الهاء",
+        content: "حرف الهاء حرف مهم يُنطق هاً. نجد حرف الهاء في كلمات مثل: هلال، هدية، هرّة. تعلّم كيف تميّز حرف الهاء وتقرأ الكلمات التي تحتوي عليه.",
+        words: ["هلال", "هدية", "هرّة", "هدوء", "هامش", "هرم", "هاتف", "هرة"],
+        tip: "حرف الهاء يُنطق من الحلق. مارس نطقه!",
+        isIntro: false,
+      },
+      {
+        order: 3, title: "حرف الذال", letter: "ذ",
+        objectives: "التعرف على حرف الذال وأصواته وقراءة وكتابة كلمات تحتوي على حرف الذال",
+        content: "حرف الذال حرف جميل يُنطق ذالاً. نجد حرف الذال في كلمات مثل: ذئب، ذهب، ذراع. تعلّم كيف تكتب حرف الذال وتقرأ الكلمات التي تحتوي عليه.",
+        words: ["ذئب", "ذهب", "ذراع", "ذرة", "ذكية", "ذكر", "ذوق", "ذباب"],
+        tip: "حرف الذال يشبه حرف الدال لكن له نقطة أعلاه. فرّق بينهما!",
+        isIntro: false,
+      },
+      {
+        order: 4, title: "حرف الظاء", letter: "ظ",
+        objectives: "التعرف على حرف الظاء وأصواته وقراءة وكتابة كلمات تحتوي على حرف الظاء",
+        content: "حرف الظاء حرف مميز يُنطق ظاءً. نجد حرف الظاء في كلمات مثل: ظرف، ظل، ظاهر. تعلّم كيف تكتب حرف الظاء وتقرأ الكلمات التي تحتوي عليه.",
+        words: ["ظرف", "ظل", "ظاهر", "ظريف", "نظر", "ظهر", "وظيفة", "ظلمة"],
+        tip: "حرف الظاء يشبه حرف الطاء لكن له نقطة أعلاه. فرّق بينهما!",
+        isIntro: false,
+      },
+    ],
+  },
+  {
+    order: 4,
+    title: "مدرستي",
+    description: "في هذا الوحدة سنتعلم عن المدرسة والحروف ط ص ض ث",
+    lessons: [
+      {
+        order: 0, title: "تمهيد: مدرستي", letter: "",
+        objectives: "التعرف على بيئة المدرسة وأدوات الدراسة وأسمائها باللغة العربية",
+        content: "المدرسة مكان جميل نتعلم فيه. في المدرسة نجد فصولاً ومعلمين وزملاء. نستخدم أدوات مثل القلم والكتاب والمسطرة. المدرسة تساعدنا على التعلم والنمو. تعلّم كلمات عن مدرستك!",
+        words: ["مدرسة", "فصل", "معلم", "كتاب", "قلم", "مكتب"],
+        tip: "المدرسة مكان رائع للتعلم، تعلّم كلمات عنها!",
+        isIntro: true,
+        introWords: ["مدرسة", "فصل", "معلم", "كتاب", "قلم", "مكتب"],
+        introMeanings: {
+          "مدرسة": "مكان نتعلم فيه", "فصل": "الغرفة التي ندرس فيها",
+          "معلم": "الشخص الذي يعلّمنا", "كتاب": "موضوع نقرأ منه",
+          "قلم": "أداة نكتب بها", "مكتب": "مكان نجلس عليه للدراسة",
+        },
+      },
+      {
+        order: 1, title: "حرف الطاء", letter: "ط",
+        objectives: "التعرف على حرف الطاء وأصواته وقراءة وكتابة كلمات تحتوي على حرف الطاء",
+        content: "حرف الطاء حرف قوي يُنطق طاءً. نجد حرف الطاء في كلمات مثل: طائر، طاولة، طالب. تعلّم كيف تكتب حرف الطاء وتقرأ الكلمات التي تحتوي عليه.",
+        words: ["طائر", "طاولة", "طالب", "طريق", "طباشير", "طابور", "طفل", "طيران"],
+        tip: "حرف الطاء له رأس دائري وذيل طويل. تعرّف على شكله!",
+        isIntro: false,
+      },
+      {
+        order: 2, title: "حرف الصاد", letter: "ص",
+        objectives: "التعرف على حرف الصاد وأصواته وقراءة وكتابة كلمات تحتوي على حرف الصاد",
+        content: "حرف الصاد حرف مميز يُنطق صاداً. نجد حرف الصاد في كلمات مثل: صقر، صباح، صندوق. تعلّم كيف تميّز حرف الصاد وتقرأ الكلمات التي تحتوي عليه.",
+        words: ["صقر", "صباح", "صندوق", "صديق", "صفر", "صف", "صومعة", "صوت"],
+        tip: "حرف الصاد يُنطق من الحلق. فرّق بينه وبين حرف السين!",
+        isIntro: false,
+      },
+      {
+        order: 3, title: "حرف الضاد", letter: "ض",
+        objectives: "التعرف على حرف الضاد وأصواته وقراءة وكتابة كلمات تحتوي على حرف الضاد",
+        content: "حرف الضاد هو حرف فريد في اللغة العربية لا يوجد في معظم اللغات الأخرى. يُنطق ضاداً. نجد حرف الضاد في كلمات مثل: ضفدع، ضوء، ضحك. تعلّم كيف تكتب حرف الضاد وتقرأ الكلمات التي تحتوي عليه.",
+        words: ["ضفدع", "ضوء", "ضحك", "ضربة", "ضخم", "ضغط", "ضعف", "ضجيج"],
+        tip: "حرف الضاد حرف عربي فريد. مارس نطقه كثيراً!",
+        isIntro: false,
+      },
+      {
+        order: 4, title: "حرف الثاء", letter: "ث",
+        objectives: "التعرف على حرف الثاء وأصواته وقراءة وكتابة كلمات تحتوي على حرف الثاء",
+        content: "حرف الثاء حرف جميل يُنطق ثاءً. نجد حرف الثاء في كلمات مثل: ثعلب، ثلج، ثوب. تعلّم كيف تكتب حرف الثاء وتقرأ الكلمات التي تحتوي عليه.",
+        words: ["ثعلب", "ثلج", "ثوب", "ثريا", "ثابت", "ثقيل", "ثمن", "ثمار"],
+        tip: "حرف الثاء يشبه حرف التاء لكن له ثلاث نقاط. فرّق بينهما!",
+        isIntro: false,
+      },
+    ],
+  },
 ];
 
 // ============================================================================
-// MAIN SEED FUNCTION
+// ACHIEVEMENTS DATA
 // ============================================================================
 
-async function main() {
-  console.log("🗑️  حذف البيانات القديمة...");
-  
-  // Delete in correct order (respect foreign keys)
-  await db.studentAchievement.deleteMany();
-  await db.certificate.deleteMany();
-  await db.attempt.deleteMany();
-  await db.progress.deleteMany();
-  await db.questionBank.deleteMany();
-  await db.lesson.deleteMany();
-  await db.unit.deleteMany();
-  await db.achievement.deleteMany();
-  await db.student.deleteMany();
+export const ACHIEVEMENTS: Achievement[] = [
+  { id: "ach-1", key: "أول حرف", title: "أول حرف", description: "تعلم أول حرف عربي", icon: "🔤", xpReward: 10 },
+  { id: "ach-2", key: "أول كلمة", title: "أول كلمة", description: "تعلم أول كلمة عربية", icon: "📖", xpReward: 15 },
+  { id: "ach-3", key: "أول درس", title: "أول درس", description: "أكمل أول درس بنجاح", icon: "✅", xpReward: 20 },
+  { id: "ach-4", key: "أول وحدة", title: "أول وحدة", description: "أكمل أول وحدة بالكامل", icon: "🏆", xpReward: 50 },
+  { id: "ach-5", key: "أول 100 نقطة", title: "أول 100 نقطة", description: "اجمع 100 نقطة خبرة", icon: "💯", xpReward: 0 },
+  { id: "ach-6", key: "إكمال الوحدة الأولى", title: "إكمال الوحدة الأولى", description: "أكمل وحدة أسرتي بالكامل", icon: "👨‍👩‍👧‍👦", xpReward: 50 },
+  { id: "ach-7", key: "إكمال الوحدة الثانية", title: "إكمال الوحدة الثانية", description: "أكمل وحدة حيواناتي بالكامل", icon: "🦁", xpReward: 50 },
+  { id: "ach-8", key: "إكمال الوحدة الثالثة", title: "إكمال الوحدة الثالثة", description: "أكمل وحدة أجزاء جسمي بالكامل", icon: "🧍", xpReward: 50 },
+  { id: "ach-9", key: "إكمال الوحدة الرابعة", title: "إكمال الوحدة الرابعة", description: "أكمل وحدة مدرستي بالكامل", icon: "🏫", xpReward: 50 },
+  { id: "ach-10", key: "إكمال المنهج", title: "إكمال المنهج", description: "أكمل جميع وحدات المنهج", icon: "🎓", xpReward: 200 },
+  { id: "ach-11", key: "نجم الصف الأول", title: "نجم الصف الأول", description: "حصل على نجوم في كل الدروس", icon: "⭐", xpReward: 100 },
+  { id: "ach-12", key: "بطل الاختبار", title: "بطل الاختبار", description: "حصل على درجة كاملة في اختبار", icon: "🥇", xpReward: 30 },
+];
 
-  console.log("✅ تم حذف البيانات القديمة\n");
+// ============================================================================
+// BUILD UNITS, LESSONS, QUESTIONS AT MODULE LOAD TIME
+// ============================================================================
 
-  // ===================== SEED ACHIEVEMENTS =====================
-  console.log("🏆 إنشاء الإنجازات...");
-  for (const ach of ACHIEVEMENTS) {
-    await db.achievement.upsert({
-      where: { key: ach.key },
-      update: ach,
-      create: ach,
-    });
-  }
-  console.log(`   ✅ تم إنشاء ${ACHIEVEMENTS.length} إنجاز\n`);
+const units: Unit[] = [];
+const lessons: Lesson[] = [];
+const questions: Question[] = [];
+let questionCounter = 0;
 
-  // ===================== SEED TEACHER STUDENT =====================
-  console.log("👨‍🏫 إنشاء حساب المعلم...");
-  await db.student.upsert({
-    where: { id: "teacher-default" },
-    update: {},
-    create: {
-      id: "teacher-default",
-      name: "المعلم",
-      isTeacher: true,
-      avatar: "👨‍🏫",
-      xp: 0,
-      stars: 0,
-      level: 1,
-    },
+for (const unitDef of UNIT_DEFS) {
+  const unitId = `unit-${unitDef.order}`;
+  units.push({
+    id: unitId,
+    order: unitDef.order,
+    title: unitDef.title,
+    description: unitDef.description,
   });
-  console.log("   ✅ تم إنشاء حساب المعلم\n");
 
-  // ===================== SEED UNITS & LESSONS & QUESTIONS =====================
-  let totalUnits = 0;
-  let totalLessons = 0;
-  let totalQuestions = 0;
-
-  for (const unitData of UNITS) {
-    console.log(`📚 إنشاء الوحدة ${unitData.order}: ${unitData.title}...`);
-
-    const unit = await db.unit.create({
-      data: {
-        order: unitData.order,
-        title: unitData.title,
-        description: unitData.description,
-      },
+  for (const lessonDef of unitDef.lessons) {
+    const lessonId = `lesson-u${unitDef.order}-l${lessonDef.order}`;
+    lessons.push({
+      id: lessonId,
+      unitId,
+      order: lessonDef.order,
+      title: lessonDef.title,
+      letter: lessonDef.letter,
+      objectives: lessonDef.objectives,
+      content: lessonDef.content,
+      words: lessonDef.words,
+      tip: lessonDef.tip,
+      isIntro: lessonDef.isIntro,
+      introWords: lessonDef.introWords,
+      introMeanings: lessonDef.introMeanings,
     });
-    totalUnits++;
 
-    for (const lessonData of unitData.lessons) {
-      console.log(`   📖 الدرس ${lessonData.order + 1}: ${lessonData.title}...`);
-
-      const isIntro = lessonData.isIntro;
-      const wordsJson = JSON.stringify(lessonData.words);
-
-      const lesson = await db.lesson.create({
-        data: {
-          unitId: unit.id,
-          order: lessonData.order,
-          title: lessonData.title,
-          letter: lessonData.letter,
-          objectives: lessonData.objectives,
-          content: lessonData.content,
-          words: wordsJson,
-          tip: lessonData.tip,
-        },
-      });
-      totalLessons++;
-
-      // Generate questions
-      let questions: QuestionData[];
-      if (isIntro) {
-        questions = generateIntroQuestions(
-          unitData.title,
-          lessonData.introWords || lessonData.words,
-          lessonData.introMeanings || {}
-        );
-      } else {
-        const meanings = LETTER_MEANINGS[lessonData.letter] || {};
-        questions = generateLetterQuestions(lessonData.letter, lessonData.words, meanings);
-      }
-
-      // Insert questions in batches
-      const BATCH_SIZE = 50;
-      for (let i = 0; i < questions.length; i += BATCH_SIZE) {
-        const batch = questions.slice(i, i + BATCH_SIZE);
-        await db.questionBank.createMany({
-          data: batch.map(q => ({
-            lessonId: lesson.id,
-            type: q.type,
-            question: q.question,
-            options: JSON.stringify(q.options),
-            correctAnswer: q.correctAnswer,
-            difficulty: q.difficulty,
-            hint: q.hint,
-          })),
-        });
-      }
-
-      totalQuestions += questions.length;
-      console.log(`      ✅ ${questions.length} سؤال`);
+    // Generate questions
+    let generatedQuestions: QuestionData[];
+    if (lessonDef.isIntro) {
+      generatedQuestions = generateIntroQuestions(
+        unitDef.title,
+        lessonDef.introWords || lessonDef.words,
+        lessonDef.introMeanings || {}
+      );
+    } else {
+      const meanings = LETTER_MEANINGS[lessonDef.letter] || {};
+      generatedQuestions = generateLetterQuestions(lessonDef.letter, lessonDef.words, meanings);
     }
 
-    console.log("");
+    for (const q of generatedQuestions) {
+      questions.push({
+        id: `q-${lessonId}-${questionCounter++}`,
+        lessonId,
+        type: q.type,
+        question: q.question,
+        options: q.options,
+        correctAnswer: q.correctAnswer,
+        difficulty: q.difficulty,
+        hint: q.hint,
+      });
+    }
   }
-
-  // ===================== SUMMARY =====================
-  console.log("═══════════════════════════════════════════");
-  console.log("🎉 تم إنشاء البيانات بنجاح!");
-  console.log(`   📚 الوحدات: ${totalUnits}`);
-  console.log(`   📖 الدروس: ${totalLessons}`);
-  console.log(`   ❓ الأسئلة: ${totalQuestions}`);
-  console.log(`   🏆 الإنجازات: ${ACHIEVEMENTS.length}`);
-  console.log("═══════════════════════════════════════════");
 }
 
-export async function seedDatabase() {
-  await main();
+// Sort by order
+units.sort((a, b) => a.order - b.order);
+lessons.sort((a, b) => a.order - b.order);
+
+// ============================================================================
+// EXPORTED CONSTANTS AND LOOKUP FUNCTIONS
+// ============================================================================
+
+export const UNITS = units;
+export const LESSONS = lessons;
+export const ALL_QUESTIONS = questions;
+
+const unitMap = new Map(units.map(u => [u.id, u]));
+const lessonMap = new Map(lessons.map(l => [l.id, l]));
+const questionsByLesson = new Map<string, Question[]>();
+for (const q of questions) {
+  if (!questionsByLesson.has(q.lessonId)) questionsByLesson.set(q.lessonId, []);
+  questionsByLesson.get(q.lessonId)!.push(q);
+}
+
+export function getUnitById(id: string): Unit | undefined {
+  return unitMap.get(id);
+}
+
+export function getLessonById(id: string): Lesson | undefined {
+  return lessonMap.get(id);
+}
+
+export function getLessonsByUnit(unitId: string): Lesson[] {
+  return lessons.filter(l => l.unitId === unitId).sort((a, b) => a.order - b.order);
+}
+
+export function getQuestionsByLesson(lessonId: string): Question[] {
+  return questionsByLesson.get(lessonId) || [];
+}
+
+export function getQuestionsByLessons(lessonIds: string[]): Question[] {
+  const idSet = new Set(lessonIds);
+  return questions.filter(q => idSet.has(q.lessonId));
+}
+
+export function getTotalLessonCount(): number {
+  return lessons.length;
+}
+
+export function getTotalUnitCount(): number {
+  return units.length;
+}
+
+// ============================================================================
+// LEVEL HELPERS
+// ============================================================================
+
+export function calculateLevel(xp: number): number {
+  if (xp >= 1000) return 5;
+  if (xp >= 600) return 4;
+  if (xp >= 300) return 3;
+  if (xp >= 100) return 2;
+  return 1;
+}
+
+export function getLevelTitle(level: number): string {
+  switch (level) {
+    case 5: return "نجم الصف الأول";
+    case 4: return "بطل اللغة العربية";
+    case 3: return "متعلم نشيط";
+    case 2: return "قارئ صغير";
+    default: return "مبتدئ";
+  }
+}
+
+export function getLevelInfo(xp: number) {
+  const level = calculateLevel(xp);
+  if (xp >= 1000) return { title: "نجم الصف الأول", level: 5, nextLevelXp: null as number | null };
+  if (xp >= 600) return { title: "بطل اللغة العربية", level: 4, nextLevelXp: 1000 };
+  if (xp >= 300) return { title: "متعلم نشيط", level: 3, nextLevelXp: 600 };
+  if (xp >= 100) return { title: "قارئ صغير", level: 2, nextLevelXp: 300 };
+  return { title: "مبتدئ", level: 1, nextLevelXp: 100 };
+}
+
+// Achievement lookup by key (Arabic key)
+const achievementByKey = new Map(ACHIEVEMENTS.map(a => [a.key, a]));
+
+export function getAchievementByKey(key: string): Achievement | undefined {
+  return achievementByKey.get(key);
 }

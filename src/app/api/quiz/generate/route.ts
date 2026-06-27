@@ -1,5 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getQuestionsByLesson, getLessonById } from "@/lib/curriculum-data";
+
+function shuffleArray<T>(array: T[]): T[] {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,28 +22,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const questionCount = Math.min(Math.max(count || 20, 1), 200);
-
-    // Build where clause
-    const where: Record<string, unknown> = { lessonId };
-    if (type && typeof type === "string") {
-      where.type = type;
+    const lesson = getLessonById(lessonId);
+    if (!lesson) {
+      return NextResponse.json(
+        { error: "Lesson not found" },
+        { status: 404 }
+      );
     }
 
+    const questionCount = Math.min(Math.max(count || 20, 1), 200);
+
     // Get all matching questions
-    const allQuestions = await db.questionBank.findMany({
-      where,
-      select: {
-        id: true,
-        type: true,
-        question: true,
-        options: true,
-        correctAnswer: true,
-        imageUrl: true,
-        difficulty: true,
-        hint: true,
-      },
-    });
+    let allQuestions = getQuestionsByLesson(lessonId);
+    if (type && typeof type === "string") {
+      allQuestions = allQuestions.filter((q) => q.type === type);
+    }
 
     if (allQuestions.length === 0) {
       return NextResponse.json(
@@ -47,10 +49,16 @@ export async function POST(request: NextRequest) {
     const shuffled = shuffleArray(allQuestions);
     const selected = shuffled.slice(0, Math.min(questionCount, shuffled.length));
 
-    // Parse options JSON for each question
+    // Format questions to match expected API structure
     const questions = selected.map((q) => ({
-      ...q,
-      options: safeParseJson(q.options, []),
+      id: q.id,
+      type: q.type,
+      question: q.question,
+      options: q.options,
+      correctAnswer: q.correctAnswer,
+      imageUrl: null,
+      difficulty: q.difficulty,
+      hint: q.hint,
     }));
 
     return NextResponse.json({
@@ -65,22 +73,5 @@ export async function POST(request: NextRequest) {
       { error: "Failed to generate quiz" },
       { status: 500 }
     );
-  }
-}
-
-function shuffleArray<T>(array: T[]): T[] {
-  const arr = [...array];
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
-function safeParseJson(str: string, fallback: unknown) {
-  try {
-    return JSON.parse(str);
-  } catch {
-    return fallback;
   }
 }

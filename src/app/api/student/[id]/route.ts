@@ -1,95 +1,105 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import {
+  getLevelInfo,
+  ACHIEVEMENTS,
+  UNITS,
+  getLessonsByUnit,
+} from "@/lib/curriculum-data";
 
-export async function GET(
+export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
+    const body = await request.json().catch(() => ({}));
 
-    const student = await db.student.findUnique({
-      where: { id },
-      include: {
-        progress: true,
-        achievements: {
-          include: {
-            achievement: true,
-          },
-          orderBy: { unlockedAt: "asc" },
-        },
-        certificates: {
-          orderBy: { issuedAt: "desc" },
-        },
-        _count: {
-          select: { attempts: true },
-        },
-      },
-    });
+    const student = {
+      id,
+      name: body.name || "",
+      avatar: body.avatar || "🧒",
+      xp: body.xp ?? 0,
+      stars: body.stars ?? 0,
+      level: body.level ?? 1,
+    };
 
-    if (!student) {
-      return NextResponse.json(
-        { error: "Student not found" },
-        { status: 404 }
-      );
-    }
-
-    // Fetch all lessons to enrich progress with lesson/unit info
-    const allLessons = await db.lesson.findMany({
-      include: {
-        unit: {
-          select: { id: true, title: true, order: true },
-        },
-      },
-    });
-    const lessonMap = new Map(allLessons.map((l) => [l.id, l]));
+    const completedLessons: string[] = body.completedLessons || [];
+    const lessonProgress: Record<string, { bestScore: number; starsEarned: number; attempts: number; xpEarned: number }> =
+      body.lessonProgress || {};
+    const unlockedAchievementKeys: string[] = body.unlockedAchievements || [];
 
     // Enrich progress with lesson details
-    const enrichedProgress = student.progress
-      .map((p) => {
-        const lesson = lessonMap.get(p.lessonId);
-        if (!lesson) return null;
-        return {
-          ...p,
-          lesson: {
-            id: lesson.id,
-            title: lesson.title,
-            letter: lesson.letter,
-            order: lesson.order,
-            unit: lesson.unit,
-          },
-        };
+    const enrichedProgress = Object.entries(lessonProgress)
+      .map(([lessonId, prog]) => {
+        // Find the lesson in our static data
+        for (const unit of UNITS) {
+          const lesson = getLessonsByUnit(unit.id).find((l) => l.id === lessonId);
+          if (lesson) {
+            return {
+              lessonId,
+              completed: completedLessons.includes(lessonId),
+              bestScore: prog.bestScore,
+              starsEarned: prog.starsEarned,
+              attempts: prog.attempts,
+              xpEarned: prog.xpEarned,
+              lesson: {
+                id: lesson.id,
+                title: lesson.title,
+                letter: lesson.letter,
+                order: lesson.order,
+                unit: { id: unit.id, title: unit.title, order: unit.order },
+              },
+            };
+          }
+        }
+        return null;
       })
       .filter(Boolean)
-      .sort((a, b) => a!.lesson.order - b!.lesson.order);
+      .sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
+        ((a as Record<string, unknown>).lesson as Record<string, unknown>).order >
+        ((b as Record<string, unknown>).lesson as Record<string, unknown>).order
+          ? 1
+          : -1
+      );
 
     // Compute level info
     const levelInfo = getLevelInfo(student.xp);
 
     // Count completed lessons
-    const completedLessons = student.progress.filter((p) => p.completed).length;
+    const completedCount = completedLessons.length;
+
+    // Map achievements
+    const achievements = unlockedAchievementKeys
+      .map((key) => ACHIEVEMENTS.find((a) => a.key === key))
+      .filter(Boolean)
+      .map((a) => ({
+        id: a!.id,
+        key: a!.key,
+        title: a!.title,
+        description: a!.description,
+        icon: a!.icon,
+        unlockedAt: new Date().toISOString(), // approximate
+      }));
 
     return NextResponse.json({
-      id: student.id,
-      name: student.name,
-      avatar: student.avatar,
-      xp: student.xp,
-      stars: student.stars,
-      level: student.level,
-      levelTitle: levelInfo.title,
-      nextLevelXp: levelInfo.nextLevelXp,
-      completedLessons,
-      totalAttempts: student._count.attempts,
-      progress: enrichedProgress,
-      achievements: student.achievements.map((sa) => ({
-        id: sa.achievement.id,
-        key: sa.achievement.key,
-        title: sa.achievement.title,
-        description: sa.achievement.description,
-        icon: sa.achievement.icon,
-        unlockedAt: sa.unlockedAt,
-      })),
-      certificates: student.certificates,
+      student: {
+        id: student.id,
+        name: student.name,
+        avatar: student.avatar,
+        xp: student.xp,
+        stars: student.stars,
+        level: student.level,
+        levelTitle: levelInfo.title,
+        nextLevelXp: levelInfo.nextLevelXp,
+        completedLessons: completedCount,
+        totalAttempts: Object.values(lessonProgress).reduce(
+          (sum: number, p: Record<string, unknown>) => sum + ((p.attempts as number) || 0),
+          0
+        ),
+        progress: enrichedProgress,
+        achievements,
+        certificates: [],
+      },
     });
   } catch (error) {
     console.error("Error fetching student:", error);
@@ -98,12 +108,4 @@ export async function GET(
       { status: 500 }
     );
   }
-}
-
-function getLevelInfo(xp: number) {
-  if (xp >= 1000) return { title: "نجم الصف الأول", level: 5, nextLevelXp: null };
-  if (xp >= 600) return { title: "بطل اللغة العربية", level: 4, nextLevelXp: 1000 };
-  if (xp >= 300) return { title: "متعلم نشيط", level: 3, nextLevelXp: 600 };
-  if (xp >= 100) return { title: "قارئ صغير", level: 2, nextLevelXp: 300 };
-  return { title: "مبتدئ", level: 1, nextLevelXp: 100 };
 }

@@ -10,6 +10,11 @@ interface AppState {
   stars: number;
   level: number;
 
+  // Progress tracking (persisted)
+  unlockedAchievements: string[];
+  completedLessons: string[];
+  lessonProgress: Record<string, { bestScore: number; starsEarned: number; attempts: number; xpEarned: number }>;
+
   // Navigation
   currentView:
     | 'home'
@@ -89,6 +94,8 @@ interface AppState {
     stars: number;
     level: number;
   }) => void;
+  unlockAchievements: (keys: string[]) => void;
+  updateLessonProgress: (lessonId: string, score: number, starsEarned: number, xpEarned: number) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -101,6 +108,11 @@ export const useAppStore = create<AppState>()(
       xp: 0,
       stars: 0,
       level: 1,
+
+      // Progress tracking
+      unlockedAchievements: [],
+      completedLessons: [],
+      lessonProgress: {},
 
       // Navigation default
       currentView: 'home',
@@ -190,6 +202,33 @@ export const useAppStore = create<AppState>()(
           stars: data.stars,
           level: data.level,
         }),
+
+      unlockAchievements: (keys) =>
+        set((state) => ({
+          unlockedAchievements: [
+            ...new Set([...state.unlockedAchievements, ...keys]),
+          ],
+        })),
+
+      updateLessonProgress: (lessonId, score, starsEarned, xpEarned) =>
+        set((state) => {
+          const existing = state.lessonProgress[lessonId];
+          const newCompleted = score >= 80 || existing?.bestScore >= 80;
+          return {
+            lessonProgress: {
+              ...state.lessonProgress,
+              [lessonId]: {
+                bestScore: Math.max(existing?.bestScore ?? 0, score),
+                starsEarned: Math.max(existing?.starsEarned ?? 0, starsEarned),
+                attempts: (existing?.attempts ?? 0) + 1,
+                xpEarned: (existing?.xpEarned ?? 0) + xpEarned,
+              },
+            },
+            completedLessons: newCompleted
+              ? [...new Set([...state.completedLessons, lessonId])]
+              : state.completedLessons,
+          };
+        }),
     }),
     {
       name: 'arabic-learning-storage',
@@ -201,6 +240,9 @@ export const useAppStore = create<AppState>()(
         stars: state.stars,
         level: state.level,
         currentView: state.currentView,
+        unlockedAchievements: state.unlockedAchievements,
+        completedLessons: state.completedLessons,
+        lessonProgress: state.lessonProgress,
       }),
     }
   )

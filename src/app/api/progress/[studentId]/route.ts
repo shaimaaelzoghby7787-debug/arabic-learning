@@ -1,44 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { UNITS, getLessonsByUnit } from "@/lib/curriculum-data";
 
-export async function GET(
+export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ studentId: string }> }
 ) {
   try {
     const { studentId } = await params;
+    const body = await request.json().catch(() => ({}));
 
-    const student = await db.student.findUnique({
-      where: { id: studentId },
-      select: { id: true, name: true, avatar: true },
-    });
+    const completedLessons: string[] = body.completedLessons || [];
+    const lessonProgress: Record<string, { bestScore: number; starsEarned: number; attempts: number; xpEarned: number }> =
+      body.lessonProgress || {};
 
-    if (!student) {
-      return NextResponse.json(
-        { error: "Student not found" },
-        { status: 404 }
-      );
-    }
+    const student = {
+      id: studentId,
+      name: body.name || "",
+      avatar: body.avatar || "🧒",
+    };
 
-    const progress = await db.progress.findMany({
-      where: { studentId },
-      orderBy: { createdAt: "asc" },
-    });
-
-    // Fetch lessons separately (no direct relation on Progress)
-    const lessonIds = progress.map((p) => p.lessonId);
-    const lessons = await db.lesson.findMany({
-      where: { id: { in: lessonIds } },
-      include: {
-        unit: {
-          select: { id: true, title: true, order: true },
-        },
-      },
-    });
-    const lessonMap = new Map(lessons.map((l) => [l.id, l]));
-
-    // Organize by unit
-    const byUnit = new Map<string, {
+    // Organize progress by unit
+    const byUnit: Array<{
       unitId: string;
       unitTitle: string;
       unitOrder: number;
@@ -54,44 +36,48 @@ export async function GET(
         xpEarned: number;
         lastAttemptAt: string | null;
       }>;
-    }>();
+    }> = [];
 
-    for (const p of progress) {
-      const lesson = lessonMap.get(p.lessonId);
-      if (!lesson) continue;
-
-      const unitId = lesson.unitId;
-      if (!byUnit.has(unitId)) {
-        byUnit.set(unitId, {
-          unitId,
-          unitTitle: lesson.unit.title,
-          unitOrder: lesson.unit.order,
-          lessons: [],
-        });
-      }
-
-      byUnit.get(unitId)!.lessons.push({
-        lessonId: lesson.id,
-        lessonTitle: lesson.title,
-        lessonOrder: lesson.order,
-        letter: lesson.letter,
-        completed: p.completed,
-        bestScore: p.bestScore,
-        starsEarned: p.starsEarned,
-        attempts: p.attempts,
-        xpEarned: p.xpEarned,
-        lastAttemptAt: p.lastAttemptAt?.toISOString() ?? null,
-      });
+    for (const unit of UNITS) {
+      const unitLessons = getLessonsByUnit(unit.id);
+      const unitEntry = {
+        unitId: unit.id,
+        unitTitle: unit.title,
+        unitOrder: unit.order,
+        lessons: unitLessons.map((l) => {
+          const prog = lessonProgress[l.id];
+          return {
+            lessonId: l.id,
+            lessonTitle: l.title,
+            lessonOrder: l.order,
+            letter: l.letter,
+            completed: completedLessons.includes(l.id),
+            bestScore: prog?.bestScore ?? 0,
+            starsEarned: prog?.starsEarned ?? 0,
+            attempts: prog?.attempts ?? 0,
+            xpEarned: prog?.xpEarned ?? 0,
+            lastAttemptAt: prog && prog.attempts > 0 ? new Date().toISOString() : null,
+          };
+        }),
+      };
+      byUnit.push(unitEntry);
     }
 
-    const units = Array.from(byUnit.values()).sort(
-      (a, b) => a.unitOrder - b.unitOrder
-    );
+    byUnit.sort((a, b) => a.unitOrder - b.unitOrder);
 
-    const totalCompleted = progress.filter((p) => p.completed).length;
-    const totalLessons = progress.length;
-    const totalXp = progress.reduce((sum, p) => sum + p.xpEarned, 0);
-    const totalStars = progress.reduce((sum, p) => sum + p.starsEarned, 0);
+    const totalLessons = UNITS.reduce(
+      (sum, u) => sum + getLessonsByUnit(u.id).length,
+      0
+    );
+    const totalCompleted = completedLessons.length;
+    const totalXp = Object.values(lessonProgress).reduce(
+      (sum, p) => sum + p.xpEarned,
+      0
+    );
+    const totalStars = Object.values(lessonProgress).reduce(
+      (sum, p) => sum + p.starsEarned,
+      0
+    );
 
     return NextResponse.json({
       student,
@@ -99,8 +85,11 @@ export async function GET(
       totalCompleted,
       totalXp,
       totalStars,
-      overallProgress: totalLessons > 0 ? Math.round((totalCompleted / totalLessons) * 100) : 0,
-      units,
+      overallProgress:
+        totalLessons > 0
+          ? Math.round((totalCompleted / totalLessons) * 100)
+          : 0,
+      units: byUnit,
     });
   } catch (error) {
     console.error("Error fetching progress:", error);

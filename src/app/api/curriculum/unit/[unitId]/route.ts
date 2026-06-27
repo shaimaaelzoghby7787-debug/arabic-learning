@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getUnitById, getLessonsByUnit } from "@/lib/curriculum-data";
 
 export async function GET(
   request: NextRequest,
@@ -8,14 +8,7 @@ export async function GET(
   try {
     const { unitId } = await params;
 
-    const unit = await db.unit.findUnique({
-      where: { id: unitId },
-      include: {
-        lessons: {
-          orderBy: { order: "asc" },
-        },
-      },
-    });
+    const unit = getUnitById(unitId);
 
     if (!unit) {
       return NextResponse.json(
@@ -24,15 +17,14 @@ export async function GET(
       );
     }
 
-    // Parse words JSON for each lesson
-    const lessonsWithWords = unit.lessons.map((lesson) => ({
-      ...lesson,
-      words: safeParseJson(lesson.words, []),
+    const lessons = getLessonsByUnit(unitId).map((l) => ({
+      ...l,
+      // words is already string[] from curriculum-data
     }));
 
     return NextResponse.json({
       ...unit,
-      lessons: lessonsWithWords,
+      lessons,
     });
   } catch (error) {
     console.error("Error fetching unit:", error);
@@ -40,13 +32,5 @@ export async function GET(
       { error: "Failed to fetch unit" },
       { status: 500 }
     );
-  }
-}
-
-function safeParseJson(str: string, fallback: unknown) {
-  try {
-    return JSON.parse(str);
-  } catch {
-    return fallback;
   }
 }

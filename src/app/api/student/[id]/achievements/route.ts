@@ -1,48 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { ACHIEVEMENTS } from "@/lib/curriculum-data";
 
-export async function GET(
+export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
+    const body = await request.json().catch(() => ({}));
+    const unlockedKeys: string[] = body.unlockedKeys || [];
 
-    const student = await db.student.findUnique({
-      where: { id },
-      select: { id: true },
-    });
+    const unlockedSet = new Set(unlockedKeys);
 
-    if (!student) {
-      return NextResponse.json(
-        { error: "Student not found" },
-        { status: 404 }
-      );
-    }
-
-    // Get all achievements with unlock status
-    const allAchievements = await db.achievement.findMany({
-      orderBy: { id: "asc" },
-    });
-
-    const unlockedMap = new Map(
-      (
-        await db.studentAchievement.findMany({
-          where: { studentId: id },
-          select: { achievementId: true, unlockedAt: true },
-        })
-      ).map((sa) => [sa.achievementId, sa.unlockedAt])
-    );
-
-    const achievements = allAchievements.map((a) => ({
+    const achievements = ACHIEVEMENTS.map((a) => ({
       id: a.id,
       key: a.key,
       title: a.title,
       description: a.description,
       icon: a.icon,
       xpReward: a.xpReward,
-      unlocked: unlockedMap.has(a.id),
-      unlockedAt: unlockedMap.get(a.id) ?? null,
+      unlocked: unlockedSet.has(a.key),
+      unlockedAt: unlockedSet.has(a.key) ? new Date().toISOString() : null,
     }));
 
     return NextResponse.json({ achievements });

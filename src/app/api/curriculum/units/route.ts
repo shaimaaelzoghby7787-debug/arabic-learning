@@ -1,26 +1,24 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { UNITS, getLessonsByUnit } from "@/lib/curriculum-data";
 
 export async function GET() {
   try {
-    const units = await db.unit.findMany({
-      orderBy: { order: "asc" },
-      include: {
-        lessons: {
-          orderBy: { order: "asc" },
-          select: {
-            id: true,
-            order: true,
-            title: true,
-            letter: true,
-            objectives: true,
-            tip: true,
-          },
-        },
-      },
-    });
+    const unitsWithLessons = UNITS.map((unit) => ({
+      id: unit.id,
+      order: unit.order,
+      title: unit.title,
+      description: unit.description,
+      lessons: getLessonsByUnit(unit.id).map((l) => ({
+        id: l.id,
+        order: l.order,
+        title: l.title,
+        letter: l.letter,
+        objectives: l.objectives,
+        tip: l.tip,
+      })),
+    }));
 
-    return NextResponse.json({ units });
+    return NextResponse.json({ units: unitsWithLessons });
   } catch (error) {
     console.error("Error fetching units:", error);
     return NextResponse.json(

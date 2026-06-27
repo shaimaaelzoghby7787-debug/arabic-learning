@@ -551,11 +551,19 @@ export default function QuizView() {
     currentQuestionIndex,
     quizAnswers,
     quizStartTime,
+    xp,
+    stars,
+    level,
     answerQuestion,
     nextQuestion,
     navigate,
     resetQuiz,
     setResult,
+    updateXP,
+    updateStars,
+    setLevel,
+    unlockAchievements,
+    updateLessonProgress,
   } = useAppStore();
 
   /* ─── Local State ─── */
@@ -680,11 +688,27 @@ export default function QuizView() {
           type: quizType,
           answers: quizAnswers,
           timeSpent,
+          currentXp: xp,
+          currentStars: stars,
+          currentLevel: level,
+          completedLessons: [],
         }),
       });
       const data = await res.json();
       if (res.ok) {
         setResult(data);
+        // Update store with new XP/stars/level
+        if (data.newXp !== undefined) updateXP(data.newXp);
+        if (data.newStars !== undefined) updateStars(data.newStars);
+        if (data.newLevel !== undefined) setLevel(data.newLevel);
+        // Unlock new achievements
+        if (data.newAchievements?.length > 0) {
+          unlockAchievements(data.newAchievements.map((a: { key: string }) => a.key));
+        }
+        // Update lesson progress
+        if (quizType === 'lesson_quiz' && data.score >= 80) {
+          updateLessonProgress(currentLessonId, data.score, data.starsEarned, data.xpEarned);
+        }
         navigate('results');
       } else {
         console.error('Quiz submit failed:', data.error);
@@ -694,7 +718,7 @@ export default function QuizView() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [studentId, currentLessonId, currentUnitId, quizType, quizAnswers, quizStartTime, isSubmitting, setResult, navigate]);
+  }, [studentId, currentLessonId, currentUnitId, quizType, quizAnswers, quizStartTime, isSubmitting, xp, stars, level, setResult, navigate, updateXP, updateStars, setLevel, unlockAchievements, updateLessonProgress]);
 
   /* ─── Exit quiz ─── */
   const handleExit = useCallback(() => {

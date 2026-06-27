@@ -163,7 +163,20 @@ export default function ResultsView() {
 
   useEffect(() => {
     if (studentId) {
-      fetch(`/api/student/${studentId}`)
+      fetch(`/api/student/${studentId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: useAppStore.getState().studentName,
+          avatar: useAppStore.getState().studentAvatar,
+          xp: useAppStore.getState().xp,
+          stars: useAppStore.getState().stars,
+          level: useAppStore.getState().level,
+          completedLessons: useAppStore.getState().completedLessons,
+          lessonProgress: useAppStore.getState().lessonProgress,
+          unlockedAchievements: useAppStore.getState().unlockedAchievements,
+        }),
+      })
         .then((r) => r.json())
         .then((data) => {
           if (data.student) {

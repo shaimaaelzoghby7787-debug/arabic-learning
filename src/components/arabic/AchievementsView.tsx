@@ -61,7 +61,7 @@ const GLOW_COLORS = [
 ];
 
 export default function AchievementsView() {
-  const { studentId, navigate } = useAppStore();
+  const { studentId, navigate, unlockedAchievements } = useAppStore();
   const [achievements, setAchievements] = useState<AchievementData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -71,7 +71,11 @@ export default function AchievementsView() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`/api/student/${studentId}/achievements`);
+      const res = await fetch(`/api/student/${studentId}/achievements`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unlockedKeys: unlockedAchievements }),
+      });
       if (!res.ok) {
         setError('تعذر تحميل الإنجازات');
         return;
@@ -83,7 +87,7 @@ export default function AchievementsView() {
     } finally {
       setLoading(false);
     }
-  }, [studentId]);
+  }, [studentId, unlockedAchievements]);
 
   useEffect(() => {
     fetchAchievements();
