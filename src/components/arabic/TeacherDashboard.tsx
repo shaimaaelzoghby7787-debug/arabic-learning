@@ -108,11 +108,47 @@ export default function TeacherDashboard() {
   const { navigate } = useAppStore();
   const [activeTab, setActiveTab] = useState('overview');
 
-  // Overview data
-  const [stats, setStats] = useState<OverallStats | null>(null);
+  const fetchDashboard = useCallback(async () => {
+    setLoadingDashboard(true);
+    setErrorDashboard('');
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch('/api/teacher/dashboard', { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!res.ok) throw new Error('Failed');
+      const data = await res.json();
+      setStats(data.overallStats);
+      setTopStudents(data.students.slice(0, 5));
+      setMostMissed(data.mostMissedQuestions || []);
+    } catch {
+      setStats({
+        totalStudents: 0,
+        totalLessons: 22,
+        totalUnits: 4,
+        averageCompletion: 0,
+        averageXp: 0,
+        averageLevel: 0,
+      });
+      setTopStudents([]);
+      setMostMissed([]);
+    } finally {
+      setLoadingDashboard(false);
+    }
+  }, []);
+
+  // Start with fallback data immediately, fetch in background
+  const [stats, setStats] = useState<OverallStats>({
+    totalStudents: 0,
+    totalLessons: 22,
+    totalUnits: 4,
+    averageCompletion: 0,
+    averageXp: 0,
+    averageLevel: 0,
+  });
   const [topStudents, setTopStudents] = useState<StudentSummary[]>([]);
   const [mostMissed, setMostMissed] = useState<MostMissedQuestion[]>([]);
-  const [loadingDashboard, setLoadingDashboard] = useState(true);
+  const [loadingDashboard, setLoadingDashboard] = useState(false);
   const [errorDashboard, setErrorDashboard] = useState('');
 
   // Students data
@@ -129,36 +165,6 @@ export default function TeacherDashboard() {
   // Certificates data (derived from dashboard students)
   const [certificates, setCertificates] = useState<Array<{ name: string; score: string; date: string; certNo: string; avatar: string }>>([]);
   const [loadingCerts, setLoadingCerts] = useState(false);
-
-  const fetchDashboard = useCallback(async () => {
-    setLoadingDashboard(true);
-    setErrorDashboard('');
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch('/api/teacher/dashboard', { signal: controller.signal });
-      clearTimeout(timeout);
-      if (!res.ok) throw new Error('Failed');
-      const data = await res.json();
-      setStats(data.overallStats);
-      setTopStudents(data.students.slice(0, 5));
-      setMostMissed(data.mostMissedQuestions || []);
-    } catch {
-      // Use fallback data if API fails
-      setStats({
-        totalStudents: 0,
-        totalLessons: 22,
-        totalUnits: 4,
-        averageCompletion: 0,
-        averageXp: 0,
-        averageLevel: 0,
-      });
-      setTopStudents([]);
-      setMostMissed([]);
-    } finally {
-      setLoadingDashboard(false);
-    }
-  }, []);
 
   const fetchStudents = useCallback(async () => {
     if (students.length > 0) return;
@@ -203,48 +209,7 @@ export default function TeacherDashboard() {
     if (val === 'mistakes') fetchMistakes();
   };
 
-  /* -------- Loading skeleton -------- */
-  if (loadingDashboard) {
-    return (
-      <div className="min-h-screen flex flex-col bg-gray-50">
-        <header className="px-4 pt-4 pb-2 border-b">
-          <div className="max-w-5xl mx-auto flex items-center gap-3">
-            <Skeleton className="h-10 w-10 rounded-xl" />
-            <Skeleton className="h-8 w-48 rounded-lg" />
-          </div>
-        </header>
-        <main className="flex-1 px-4 py-6 max-w-5xl mx-auto w-full">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-28 rounded-2xl" />
-            ))}
-          </div>
-          <Skeleton className="h-64 w-full rounded-2xl" />
-        </main>
-      </div>
-    );
-  }
-
-  if (errorDashboard) {
-    return (
-      <div className="min-h-screen flex flex-col bg-gray-50">
-        <header className="px-4 pt-4 pb-2 border-b">
-          <div className="max-w-5xl mx-auto flex items-center gap-3">
-            <Button variant="ghost" size="sm" onClick={() => navigate('units')} className="rounded-xl">→</Button>
-            <h1 className="text-lg font-bold text-gray-800">لوحة المعلم</h1>
-          </div>
-        </header>
-        <main className="flex-1 flex items-center justify-center px-4">
-          <div className="text-center">
-            <span className="text-5xl block mb-3">😞</span>
-            <p className="text-red-500">{errorDashboard}</p>
-            <Button onClick={fetchDashboard} variant="outline" className="mt-4 rounded-xl">إعادة المحاولة</Button>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
+  /* -------- Dashboard content -------- */
   return (
     <div className="min-h-screen flex flex-col bg-gray-50" dir="rtl">
       {/* Header */}
