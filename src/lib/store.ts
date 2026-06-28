@@ -240,7 +240,6 @@ export const useAppStore = create<AppState>()(
         xp: state.xp,
         stars: state.stars,
         level: state.level,
-        currentView: state.currentView,
         unlockedAchievements: state.unlockedAchievements,
         completedLessons: state.completedLessons,
         lessonProgress: state.lessonProgress,

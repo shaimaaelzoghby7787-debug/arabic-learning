@@ -100,21 +100,15 @@ function AppRouter() {
 
 export default function Page() {
   const [mounted, setMounted] = useState(false);
-  const { navigate } = useAppStore();
 
   useEffect(() => {
+    // Check URL params BEFORE first render
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('teacher')) {
+      useAppStore.setState({ currentView: 'teacher' });
+    }
     setMounted(true);
   }, []);
-
-  // Support ?teacher query param to open teacher dashboard directly
-  useEffect(() => {
-    if (mounted && typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.has('teacher')) {
-        navigate('teacher');
-      }
-    }
-  }, [mounted, navigate]);
 
   if (!mounted) {
     return <AppLoader />;
