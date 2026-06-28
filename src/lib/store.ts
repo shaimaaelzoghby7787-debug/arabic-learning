@@ -26,7 +26,8 @@ interface AppState {
     | 'achievements'
     | 'teacher'
     | 'certificate'
-    | 'leaderboard';
+    | 'leaderboard'
+    | 'letterboard';
 
   // Lesson state
   currentUnitId: string | null;

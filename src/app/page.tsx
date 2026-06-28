@@ -59,6 +59,10 @@ const LeaderboardView = dynamic(() => import('@/components/arabic/LeaderboardVie
   ssr: false,
   loading: () => <AppLoader />,
 });
+const LetterBoard = dynamic(() => import('@/components/arabic/LetterBoard'), {
+  ssr: false,
+  loading: () => <AppLoader />,
+});
 const DeployGuide = dynamic(() => import('@/components/arabic/DeployGuide'), {
   ssr: false,
   loading: () => <AppLoader />,
@@ -74,6 +78,7 @@ const views: Record<string, React.ComponentType> = {
   achievements: AchievementsView,
   teacher: TeacherDashboard,
   leaderboard: LeaderboardView,
+  letterboard: LetterBoard,
   certificate: UnitsView,
   deploy: DeployGuide,
 };

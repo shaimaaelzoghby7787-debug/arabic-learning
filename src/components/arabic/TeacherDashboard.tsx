@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { useAppStore } from '@/lib/store';
-import { getAllUnits, getAllLessons } from '@/lib/curriculum-data';
+import { UNITS, LESSONS } from '@/lib/curriculum-data';
 
 const LEVEL_TITLES: Record<number, string> = {
   1: 'مبتدئ', 2: 'متعلّم', 3: 'نشيط', 4: 'متقدم', 5: 'محترف', 6: 'بطل', 7: 'أسطورة',
@@ -17,8 +17,8 @@ export default function TeacherDashboard() {
   const { navigate } = useAppStore();
   const [activeTab, setActiveTab] = useState('overview');
 
-  const units = getAllUnits();
-  const lessons = getAllLessons();
+  const units = UNITS;
+  const lessons = LESSONS;
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50" dir="rtl">
