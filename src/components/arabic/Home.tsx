@@ -298,10 +298,16 @@ export default function Home() {
       </main>
 
       {/* Sticky footer */}
-      <footer className="mt-auto relative z-10 py-4 text-center">
+      <footer className="mt-auto relative z-10 py-4 text-center space-y-1">
+        <button
+          onClick={() => navigate('teacher')}
+          className="text-xs text-gray-400 hover:text-gray-600 underline cursor-pointer transition-colors"
+        >
+          👨‍🏫 دخول كمعلم
+        </button>
         <button
           onClick={() => navigate('deploy')}
-          className="text-xs text-violet-500 hover:text-violet-700 underline cursor-pointer mb-2 transition-colors"
+          className="text-xs text-violet-500 hover:text-violet-700 underline cursor-pointer block mx-auto transition-colors"
         >
           🚀 دليل نشر المنصة على الإنترنت
         </button>
